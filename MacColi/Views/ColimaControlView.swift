@@ -38,12 +38,12 @@ struct ColimaControlView: View {
         switch state.colimaState {
         case .notInstalled:
             Button {
-                TerminalLauncher.run("brew install colima docker")
+                state.installColima()
             } label: {
                 Label("Install Colima…", systemImage: "arrow.down.circle")
                     .frame(maxWidth: .infinity)
             }
-            .help("Runs `brew install colima docker` in Terminal")
+            .help("Installs Colima and Docker via Homebrew, inside the app")
 
         case .running:
             HStack(spacing: 8) {

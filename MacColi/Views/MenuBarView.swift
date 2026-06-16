@@ -13,7 +13,11 @@ struct MenuBarView: View {
 
             switch state.colimaState {
             case .notInstalled:
-                Button("Install Colima…") { TerminalLauncher.run("brew install colima docker") }
+                Button("Install Colima…") {
+                    openWindow(id: WindowID.dashboard)
+                    NSApp.activate(ignoringOtherApps: true)
+                    state.installColima()
+                }
             case .running:
                 Button("Stop Colima") { state.stopColima() }
                 Button("Restart Colima") { state.restartColima() }

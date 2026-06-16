@@ -28,7 +28,8 @@ struct DashboardView: View {
     @State private var selection: Panel? = .containers
 
     var body: some View {
-        NavigationSplitView {
+        @Bindable var state = state
+        return NavigationSplitView {
             VStack(spacing: 0) {
                 List(Panel.allCases, selection: $selection) { panel in
                     Label(panel.title, systemImage: panel.systemImage)
@@ -49,6 +50,9 @@ struct DashboardView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle("MacColi")
+        .sheet(isPresented: $state.showInstaller) {
+            InstallView()
+        }
     }
 
     @ViewBuilder
@@ -108,7 +112,8 @@ struct RequiresColimaView: View {
                 Button("Start Colima") { state.startColima() }
                     .buttonStyle(.borderedProminent)
             } else if case .notInstalled = state.colimaState {
-                Button("Install Colima…") { TerminalLauncher.run("brew install colima docker") }
+                Button("Install Colima…") { state.installColima() }
+                    .buttonStyle(.borderedProminent)
             }
         }
     }

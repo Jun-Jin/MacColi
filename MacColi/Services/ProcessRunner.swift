@@ -17,9 +17,16 @@ struct CommandResult: Sendable {
     }
 }
 
-/// Runs subprocesses asynchronously. stdout/stderr are drained concurrently so
-/// large output (e.g. `docker logs`) cannot deadlock on a full pipe buffer.
+/// Runs subprocesses asynchronously.
 actor ProcessRunner {
+    /// Runs a process and returns once it *terminates*.
+    ///
+    /// Completion is tied to process termination rather than pipe EOF on
+    /// purpose: `colima start` (and other tools) spawn long-lived background
+    /// daemons that inherit the stdout/stderr pipe descriptors and hold them
+    /// open indefinitely. Waiting for EOF would hang forever even though the
+    /// command itself has exited, so output is collected incrementally via
+    /// readability handlers and the call resolves in `terminationHandler`.
     func run(_ launchPath: String,
              _ arguments: [String],
              environment: [String: String]? = nil) async throws -> CommandResult {
@@ -36,37 +43,92 @@ actor ProcessRunner {
         process.standardOutput = outPipe
         process.standardError = errPipe
 
-        try process.run()
+        let collector = OutputCollector()
+        let outHandle = outPipe.fileHandleForReading
+        let errHandle = errPipe.fileHandleForReading
 
-        // Reading to EOF unblocks only once the process closes its pipe ends
-        // (i.e. on termination), so this drains concurrently and avoids deadlock.
-        async let outData = Self.readToEnd(outPipe.fileHandleForReading)
-        async let errData = Self.readToEnd(errPipe.fileHandleForReading)
-        let (out, err) = await (outData, errData)
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CommandResult, Error>) in
+            outHandle.readabilityHandler = { handle in
+                let data = handle.availableData
+                if !data.isEmpty { collector.append(data, to: .out) }
+            }
+            errHandle.readabilityHandler = { handle in
+                let data = handle.availableData
+                if !data.isEmpty { collector.append(data, to: .err) }
+            }
 
-        process.waitUntilExit() // returns immediately; the reads already saw EOF
+            process.terminationHandler = { proc in
+                outHandle.readabilityHandler = nil
+                errHandle.readabilityHandler = nil
+                let (out, err) = collector.snapshot()
+                continuation.resume(returning: CommandResult(
+                    exitCode: proc.terminationStatus,
+                    stdout: String(decoding: out, as: UTF8.self),
+                    stderr: String(decoding: err, as: UTF8.self)
+                ))
+            }
 
-        return CommandResult(
-            exitCode: process.terminationStatus,
-            stdout: String(decoding: out, as: UTF8.self),
-            stderr: String(decoding: err, as: UTF8.self)
-        )
-    }
-
-    /// Reads a file handle to EOF on a background queue, bridged to async.
-    private static func readToEnd(_ handle: FileHandle) async -> Data {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Data, Never>) in
-            let box = UncheckedSendable(handle)
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: box.value.readDataToEndOfFile())
+            do {
+                try process.run()
+            } catch {
+                outHandle.readabilityHandler = nil
+                errHandle.readabilityHandler = nil
+                continuation.resume(throwing: error)
             }
         }
     }
+
+    /// Runs a process, forwarding merged stdout+stderr one line at a time, and
+    /// returns the exit code. Used for long-running commands (e.g. `brew install`)
+    /// whose progress should stream into the UI.
+    func runStreaming(_ launchPath: String,
+                      _ arguments: [String],
+                      environment: [String: String]? = nil,
+                      onOutput: @escaping @Sendable (String) -> Void) async throws -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: launchPath)
+        process.arguments = arguments
+
+        var env = ProcessInfo.processInfo.environment
+        if let environment { env.merge(environment) { _, new in new } }
+        process.environment = env
+
+        // Merge stdout and stderr into one pipe so output is interleaved in order.
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        try process.run()
+
+        // `await` on each line keeps the actor reentrant so other work isn't blocked.
+        for try await line in pipe.fileHandleForReading.bytes.lines {
+            onOutput(line)
+        }
+
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
 }
 
-/// Transfers a non-Sendable value across a concurrency boundary where we can
-/// guarantee single-threaded access by construction.
-struct UncheckedSendable<Value>: @unchecked Sendable {
-    let value: Value
-    init(_ value: Value) { self.value = value }
+/// Thread-safe accumulator for subprocess output, written from background
+/// readability handlers and read back when the process terminates.
+private final class OutputCollector: @unchecked Sendable {
+    enum Stream { case out, err }
+
+    private let lock = NSLock()
+    private var out = Data()
+    private var err = Data()
+
+    func append(_ data: Data, to stream: Stream) {
+        lock.withLock {
+            switch stream {
+            case .out: out.append(data)
+            case .err: err.append(data)
+            }
+        }
+    }
+
+    func snapshot() -> (Data, Data) {
+        lock.withLock { (out, err) }
+    }
 }
