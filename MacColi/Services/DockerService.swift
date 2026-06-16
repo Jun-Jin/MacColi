@@ -47,8 +47,26 @@ struct DockerService {
         return JSONLines.decode(DockerImage.self, from: out)
     }
 
-    func pullImage(_ reference: String) async throws {
-        try await cli.run("docker", ["pull", reference], environment: env())
+    /// Pulls an image, forwarding `docker pull` progress line-by-line. Retries
+    /// transient daemon errors (e.g. a momentary gRPC `context canceled`, common
+    /// right after a Colima start/restart or under memory pressure) a couple of
+    /// times before giving up, so a hiccup doesn't surface as a hard failure.
+    func pullImage(_ reference: String,
+                   onProgress: @escaping @Sendable (String) -> Void) async throws {
+        let maxAttempts = 3
+        var attempt = 0
+        while true {
+            attempt += 1
+            do {
+                try await cli.runStreamingChecked("docker", ["pull", reference],
+                                                  environment: env(), onOutput: onProgress)
+                return
+            } catch let error as CLIError where error.isTransient && attempt < maxAttempts {
+                onProgress("Transient daemon error — retrying (\(attempt)/\(maxAttempts - 1))…")
+                try? await Task.sleep(for: .seconds(2))
+                continue
+            }
+        }
     }
 
     func removeImage(_ id: String, force: Bool) async throws {

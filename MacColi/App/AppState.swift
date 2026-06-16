@@ -45,7 +45,7 @@ final class AppState {
         let d = UserDefaults.standard
         // `didSet` does not fire during initialization, so no redundant writes here.
         cpus = d.object(forKey: "config.cpus") as? Int ?? 2
-        memoryGiB = d.object(forKey: "config.memoryGiB") as? Int ?? 2
+        memoryGiB = d.object(forKey: "config.memoryGiB") as? Int ?? 4
         diskGiB = d.object(forKey: "config.diskGiB") as? Int ?? 60
         runtime = (d.string(forKey: "config.runtime")).flatMap(ContainerRuntime.init) ?? .docker
     }
@@ -240,7 +240,13 @@ final class AppState {
 
     // MARK: - Image actions
 
-    func pullImage(_ reference: String) { resourceAction("Pulling \(reference)…") { try await self.docker.pullImage(reference) } }
+    func pullImage(_ reference: String) {
+        resourceAction("Pulling \(reference)…") {
+            try await self.docker.pullImage(reference) { line in
+                Task { @MainActor in self.busyMessage = "Pulling \(reference): \(line)" }
+            }
+        }
+    }
     func removeImage(_ image: DockerImage) { resourceAction("Removing \(image.reference)…") { try await self.docker.removeImage(image.id, force: true) } }
 
     // MARK: - Volume actions

@@ -12,6 +12,22 @@ enum CLIError: LocalizedError {
             return "`\(command)` failed: \(message)"
         }
     }
+
+    /// True for daemon errors that are typically transient rather than real
+    /// failures: a momentary cancellation of dockerd's internal gRPC connection
+    /// (`context canceled` / `client connection is closing`), a daemon that
+    /// isn't quite ready yet right after a Colima start/restart, or a network
+    /// blip. These are worth retrying before surfacing to the user.
+    var isTransient: Bool {
+        guard case .failed(_, let message) = self else { return false }
+        let m = message.lowercased()
+        return m.contains("context canceled")
+            || m.contains("client connection is closing")
+            || m.contains("code = canceled")
+            || m.contains("connection refused")
+            || m.contains("i/o timeout")
+            || m.contains("unexpected eof")
+    }
 }
 
 /// Process-wide cache of executable directories discovered from the user's login
@@ -151,5 +167,47 @@ struct CLI {
         guard let binary = path(for: name) else { throw CLIError.notInstalled(name) }
         let env = environment ?? ["PATH": augmentedPATH]
         return try await runner.runStreaming(binary, arguments, environment: env, onOutput: onOutput)
+    }
+
+    /// Streams a tool's merged output line-by-line (so the UI can show live
+    /// progress) and throws `CLIError.failed` — carrying the tail of the output
+    /// as the message — on a non-zero exit. The throwing counterpart to
+    /// `runStreaming`, mirroring how `run` throws over `runRaw`.
+    func runStreamingChecked(_ name: String,
+                             _ arguments: [String],
+                             environment: [String: String]? = nil,
+                             onOutput: @escaping @Sendable (String) -> Void) async throws {
+        let tail = LineTail()
+        let code = try await runStreaming(name, arguments, environment: environment) { line in
+            tail.append(line)
+            onOutput(line)
+        }
+        guard code == 0 else {
+            throw CLIError.failed(command: "\(name) \(arguments.joined(separator: " "))",
+                                  message: tail.snapshot())
+        }
+    }
+}
+
+/// Thread-safe ring of the most recent non-empty output lines. Lets a streamed
+/// command build an error message from its tail without retaining all output;
+/// written from the background streaming callback, read when it exits non-zero.
+private final class LineTail: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+    private let maxLines = 8
+
+    func append(_ line: String) {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        lock.withLock {
+            lines.append(trimmed)
+            if lines.count > maxLines { lines.removeFirst(lines.count - maxLines) }
+        }
+    }
+
+    func snapshot() -> String {
+        let captured = lock.withLock { lines }
+        return captured.isEmpty ? "command failed" : captured.joined(separator: "\n")
     }
 }
