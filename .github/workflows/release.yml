@@ -23,7 +23,7 @@ jobs:
   release:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # MacColi.xcodeproj is objectVersion 77 (Xcode 16+ synchronized-folder
       # format); the image's default Xcode may be older and would fail with
@@ -85,7 +85,7 @@ jobs:
         run: bash .claude/skills/release/release.sh --dmg
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: MacColi-dist
           path: |
