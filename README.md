@@ -1,0 +1,2 @@
+# maccoli
+Colima desktop app
