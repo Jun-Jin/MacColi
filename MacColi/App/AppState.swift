@@ -228,7 +228,11 @@ final class AppState {
     func stopContainer(_ c: Container) { resourceAction("Stopping \(c.displayName)…") { try await self.docker.stopContainer(c.id) } }
     func restartContainer(_ c: Container) { resourceAction("Restarting \(c.displayName)…") { try await self.docker.restartContainer(c.id) } }
     func removeContainer(_ c: Container) { resourceAction("Removing \(c.displayName)…") { try await self.docker.removeContainer(c.id, force: c.isRunning) } }
-    func openShell(_ c: Container) { docker.openShell(in: c) }
+    func openShell(_ c: Container) {
+        if !docker.openShell(in: c) {
+            errorMessage = "Couldn't open a shell for \(c.displayName). Is the container running?"
+        }
+    }
 
     func logs(for c: Container) async -> String {
         (try? await docker.logs(c.id)) ?? "Failed to read logs."

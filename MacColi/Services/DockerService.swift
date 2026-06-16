@@ -78,15 +78,44 @@ struct DockerService {
 
     // MARK: Exec
 
-    /// Opens Terminal.app with an interactive shell inside the container.
-    func openShell(in container: Container) {
-        guard let dockerPath = cli.path(for: "docker") else { return }
-        var command = "export PATH=\(cli.augmentedPATH); "
+    /// Opens an interactive shell inside the container in Terminal.app.
+    ///
+    /// Writes a `.command` script and launches it via LaunchServices (`open`)
+    /// rather than driving Terminal with Apple Events. `open` needs no Automation
+    /// (Apple Events) TCC permission, which an ad-hoc-signed, frequently-rebuilt
+    /// app can't reliably obtain — that path silently failed to open a shell.
+    @discardableResult
+    func openShell(in container: Container) -> Bool {
+        guard let dockerPath = cli.path(for: "docker") else { return false }
+
+        var lines = ["#!/bin/zsh", "export PATH=\(shellQuoted(cli.augmentedPATH))"]
         if let socket = cli.colimaDockerSocket {
-            command += "export DOCKER_HOST=unix://\(socket); "
+            lines.append("export DOCKER_HOST=\(shellQuoted("unix://\(socket)"))")
         }
+        lines.append("clear")
+        lines.append("echo \(shellQuoted("Connecting to \(container.displayName) (\(container.id))…"))")
         // Prefer bash if present, fall back to sh.
-        command += "\(dockerPath) exec -it \(container.id) sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'"
-        TerminalLauncher.run(command)
+        lines.append("exec \(shellQuoted(dockerPath)) exec -it \(shellQuoted(container.id)) sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'")
+        let script = lines.joined(separator: "\n") + "\n"
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("maccoli-shell-\(container.id).command")
+        do {
+            try script.write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        } catch {
+            return false
+        }
+
+        // `open -a Terminal <file.command>` runs the script in a new Terminal window.
+        let open = Process()
+        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        open.arguments = ["-a", "Terminal", url.path]
+        do { try open.run(); return true } catch { return false }
+    }
+
+    /// Wraps a value in single quotes for safe inclusion in a shell script.
+    private func shellQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
