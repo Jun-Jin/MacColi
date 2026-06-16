@@ -1,6 +1,9 @@
 # Build product copied to repo root for `open MacColi.app` (see CLAUDE.md)
 /MacColi.app/
 
+# Release artifacts (signed/notarized .app, .zip, .dmg)
+/dist/
+
 # Xcode
 #
 # gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
