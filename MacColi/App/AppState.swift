@@ -44,6 +44,9 @@ final class AppState {
     @ObservationIgnored private let colima = ColimaService()
     @ObservationIgnored private let docker = DockerService()
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+    // Seed Settings from the real VM only once per launch, so polling never
+    // clobbers edits the user is making in the Settings panel.
+    @ObservationIgnored private var didSyncLiveConfig = false
 
     init() {
         let d = UserDefaults.standard
@@ -103,6 +106,7 @@ final class AppState {
         do {
             if let instance = try await colima.defaultInstance() {
                 colimaState = instance.isRunning ? .running(instance) : .stopped
+                await syncConfigFromLiveVM()
             } else {
                 colimaState = .stopped
             }
@@ -115,6 +119,27 @@ final class AppState {
         } else {
             clearResources()
         }
+    }
+
+    /// Seeds the editable Settings fields from the real VM the first time an
+    /// existing profile is observed. Without this, the panel shows the app's
+    /// hardcoded defaults (2 CPU / 4 GiB / 60 GiB) regardless of the actual VM,
+    /// so "Apply & Restart" would shrink a larger VM (and error on disk, which
+    /// can only grow). Runs once per launch — the guard is set only on a
+    /// successful read, so it retries until a profile exists, then stops so it
+    /// never overwrites in-progress edits.
+    private func syncConfigFromLiveVM() async {
+        guard !didSyncLiveConfig else { return }
+        guard let live = await colima.currentConfig() else { return }
+        didSyncLiveConfig = true
+        cpus = live.cpus
+        memoryGiB = live.memoryGiB
+        diskGiB = live.diskGiB
+        runtime = live.runtime
+        arch = live.arch
+        vmType = live.vmType
+        vzRosetta = live.vzRosetta
+        mountType = live.mountType
     }
 
     func refreshResources() async {
