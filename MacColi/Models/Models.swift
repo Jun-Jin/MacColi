@@ -5,11 +5,13 @@ import Foundation
 enum ContainerRuntime: String, CaseIterable, Identifiable, Codable {
     case docker
     case containerd
+    case incus
     var id: String { rawValue }
     var label: String {
         switch self {
         case .docker: return "Docker"
         case .containerd: return "containerd"
+        case .incus: return "Incus"
         }
     }
 }
