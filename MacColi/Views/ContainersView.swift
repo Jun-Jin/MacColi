@@ -144,6 +144,8 @@ private struct ContainerRow: View {
         HStack(spacing: 12) {
             if selectMode {
                 SelectionCheckmark(isSelected: isSelected)
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onToggle)
             }
 
             // Tapping anywhere across the info area opens logs (or, in select

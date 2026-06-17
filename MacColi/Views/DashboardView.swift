@@ -113,6 +113,17 @@ struct StatusBanner: View {
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 .background(Color.orange.opacity(0.12))
             }
+            if let info = state.infoMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Text(info).font(.callout).textSelection(.enabled)
+                    Spacer()
+                    Button { state.infoMessage = nil } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.borderless)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(Color.green.opacity(0.12))
+            }
         }
     }
 }

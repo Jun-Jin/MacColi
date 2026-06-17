@@ -105,6 +105,19 @@ struct DockerService {
         try await cli.run("docker", args, environment: env())
     }
 
+    // MARK: System
+
+    /// Reclaims space with `docker system prune`: removes stopped containers,
+    /// dangling images, unused networks, and build cache. `until=<age>` limits
+    /// it to objects created before that age (e.g. "24h"). `-f` skips the
+    /// interactive y/N prompt, which our non-interactive process can't answer.
+    /// Volumes are intentionally left alone (no `--volumes`). Returns docker's
+    /// report, whose last line is "Total reclaimed space: …".
+    func systemPrune(until: String = "24h") async throws -> String {
+        try await cli.run("docker", ["system", "prune", "-f", "--filter", "until=\(until)"],
+                          environment: env())
+    }
+
     // MARK: Exec
 
     /// Opens an interactive shell inside the container in Terminal.app.

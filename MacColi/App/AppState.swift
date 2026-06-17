@@ -22,6 +22,9 @@ final class AppState {
     private(set) var isBusy: Bool = false
     var busyMessage: String = ""
     var errorMessage: String?
+    // A transient success note (e.g. space reclaimed by a prune), shown in the
+    // status banner until the user dismisses it or the next action clears it.
+    var infoMessage: String?
     // Set when an operation failed because the VM doesn't trust the network's
     // TLS certificate; drives the "add a CA" affordance in the error banner.
     var caCertIssue: Bool = false
@@ -428,6 +431,40 @@ final class AppState {
     func createVolume(_ name: String) { resourceAction("Creating \(name)…") { try await self.docker.createVolume(name) } }
     func removeVolume(_ volume: Volume) { resourceAction("Removing \(volume.name)…") { try await self.docker.removeVolume(volume.name, force: false) } }
 
+    // MARK: - System maintenance
+
+    /// Runs `docker system prune --filter until=24h`: reclaims stopped
+    /// containers, dangling images, unused networks, and build cache older than
+    /// 24 hours (volumes untouched), then surfaces the reclaimed space as an
+    /// info note. Not routed through `resourceAction` because it reports a
+    /// success summary rather than just refreshing.
+    func pruneSystem() {
+        Task {
+            isBusy = true
+            busyMessage = "Cleaning up data older than 24h…"
+            errorMessage = nil
+            infoMessage = nil
+            defer { isBusy = false; busyMessage = "" }
+            do {
+                let report = try await docker.systemPrune(until: "24h")
+                await refreshResources()
+                infoMessage = Self.reclaimedSummary(from: report)
+            } catch {
+                errorMessage = describe(error)
+            }
+        }
+    }
+
+    /// Extracts docker's "Total reclaimed space: …" line from a prune report,
+    /// falling back to a generic note if the format ever changes.
+    private static func reclaimedSummary(from report: String) -> String {
+        let summary = report
+            .split(whereSeparator: \.isNewline)
+            .last { $0.localizedCaseInsensitiveContains("reclaimed space") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        return summary ?? "Cleanup complete."
+    }
+
     // MARK: - Bulk actions
 
     func startContainers(_ cs: [Container]) { bulkAction(cs, "Starting \(cs.count) containers…") { try await self.docker.startContainer($0.id) } }
@@ -448,6 +485,7 @@ final class AppState {
             isBusy = true
             busyMessage = message
             errorMessage = nil
+            infoMessage = nil
             defer { isBusy = false; busyMessage = "" }
             var firstError: Error?
             var failures = 0
@@ -534,6 +572,7 @@ final class AppState {
         isBusy = true
         busyMessage = message
         errorMessage = nil
+        infoMessage = nil
 
         Task {
             let watcher = Task { @MainActor in
@@ -570,6 +609,7 @@ final class AppState {
             isBusy = true
             busyMessage = message
             errorMessage = nil
+            infoMessage = nil
             defer { isBusy = false; busyMessage = "" }
             do { try await work() }
             catch {
@@ -585,6 +625,7 @@ final class AppState {
             isBusy = true
             busyMessage = message
             errorMessage = nil
+            infoMessage = nil
             defer { isBusy = false; busyMessage = "" }
             do {
                 try await work()
