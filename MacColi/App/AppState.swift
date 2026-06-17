@@ -21,8 +21,8 @@ final class AppState {
 
     // Live stats (running containers only), keyed by short container id, plus
     // rolling per-container and VM-wide history for sparklines. Populated by a
-    // dedicated, slower loop that runs only while the Containers panel is on
-    // screen — `docker stats` is too costly for the main refresh cadence.
+    // dedicated, slower loop that runs only while live monitoring is enabled —
+    // `docker stats` is too costly for the main refresh cadence.
     private(set) var stats: [String: ContainerStats] = [:]
     private(set) var cpuHistory: [String: [Double]] = [:]
     private(set) var memHistory: [String: [Double]] = [:]
@@ -95,10 +95,9 @@ final class AppState {
     @ObservationIgnored private let colima = ColimaService()
     @ObservationIgnored private let docker = DockerService()
     @ObservationIgnored private var pollTask: Task<Void, Never>?
-    // The stats loop runs only when both are true: the Containers panel is
-    // visible and the window is frontmost. See reconcileStatsMonitoring.
+    // The stats loop runs while monitoring is enabled and the window is
+    // frontmost. See reconcileStatsMonitoring.
     @ObservationIgnored private var statsTask: Task<Void, Never>?
-    @ObservationIgnored private var statsPanelVisible = false
     @ObservationIgnored private var statsSceneActive = true
     // Samples retained per series for sparklines.
     @ObservationIgnored private static let historyLength = 40
@@ -201,18 +200,10 @@ final class AppState {
 
     // MARK: - Live stats monitoring
 
-    /// Called by the Containers panel as it appears/disappears. Stats are only
-    /// worth collecting while that panel is on screen, so this gates the
-    /// expensive `docker stats` loop on visibility (combined with scene focus).
-    func setStatsPanelVisible(_ visible: Bool) {
-        statsPanelVisible = visible
-        reconcileStatsMonitoring()
-    }
-
-    /// Starts the stats loop when the panel is visible and the window is
+    /// Starts the stats loop when monitoring is enabled and the window is
     /// frontmost; tears it down otherwise. Idempotent.
     private func reconcileStatsMonitoring() {
-        let shouldRun = monitoringEnabled && statsPanelVisible && statsSceneActive
+        let shouldRun = monitoringEnabled && statsSceneActive
         if shouldRun {
             guard statsTask == nil else { return }
             statsTask = Task { [weak self] in await self?.runStatsLoop() }

@@ -41,8 +41,11 @@ struct DashboardView: View {
                 .listStyle(.sidebar)
 
                 Divider()
-                ColimaControlView()
-                    .padding(12)
+                VStack(spacing: 12) {
+                    if state.colimaState.isRunning { VMMonitorSection() }
+                    ColimaControlView()
+                }
+                .padding(12)
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
         } detail: {
