@@ -3,6 +3,21 @@ import SwiftUI
 struct ContainersView: View {
     @Environment(AppState.self) private var state
     @State private var logTarget: Container?
+    @State private var search = ""
+    // Driven by the ⌘F command; setting it true focuses the search field on macOS.
+    @State private var searchPresented = false
+
+    /// Containers matching the filter, by name, image, status or ports.
+    private var filtered: [Container] {
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return state.containers }
+        return state.containers.filter {
+            $0.displayName.lowercased().contains(q)
+                || $0.image.lowercased().contains(q)
+                || $0.status.lowercased().contains(q)
+                || $0.ports.lowercased().contains(q)
+        }
+    }
 
     var body: some View {
         Group {
@@ -11,14 +26,18 @@ struct ContainersView: View {
             } else if state.containers.isEmpty {
                 ContentUnavailableView("No containers", systemImage: "shippingbox",
                                        description: Text("Run a container to see it here."))
+            } else if filtered.isEmpty {
+                ContentUnavailableView.search(text: search)
             } else {
-                List(state.containers) { container in
+                List(filtered) { container in
                     ContainerRow(container: container) { logTarget = container }
                 }
                 .listStyle(.inset)
             }
         }
         .navigationTitle("Containers")
+        .searchable(text: $search, isPresented: $searchPresented, placement: .toolbar, prompt: "Filter containers")
+        .onChange(of: state.findRequestToken) { searchPresented = true }
         .toolbar { RefreshButton() }
         .sheet(item: $logTarget) { container in
             LogsView(container: container)

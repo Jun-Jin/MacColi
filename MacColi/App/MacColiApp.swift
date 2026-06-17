@@ -20,6 +20,12 @@ struct MacColiApp: App {
                 Button("Refresh") { Task { await state.refresh() } }
                     .keyboardShortcut("r", modifiers: .command)
             }
+            // Standard ⌘F "Find" in the Edit menu. The active resource panel
+            // focuses its filter field in response (see findRequestToken).
+            CommandGroup(after: .textEditing) {
+                Button("Find") { state.findRequestToken += 1 }
+                    .keyboardShortcut("f", modifiers: .command)
+            }
         }
 
         // Menu bar status item.

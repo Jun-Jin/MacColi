@@ -27,6 +27,10 @@ final class AppState {
     var caCertIssue: Bool = false
     // A panel the UI should navigate to (e.g. jumping to Settings from a banner).
     var requestedPanel: Panel?
+    // Bumped by the ⌘F "Find" menu command. The visible resource panel observes
+    // this and focuses its search field — the bridge from an app-level keyboard
+    // command to the active view's local focus state.
+    var findRequestToken = 0
 
     // Managed root CA certificates installed into the VM (corporate proxy fix).
     private(set) var caCertificates: [String] = []
