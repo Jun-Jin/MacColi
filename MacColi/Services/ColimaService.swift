@@ -82,10 +82,10 @@ struct ColimaService {
         return Int((bytes + gib / 2) / gib)
     }
 
-    /// Reads a profile's `colima.yaml`, trying `$COLIMA_HOME`, then Colima's
-    /// XDG default (`$XDG_CONFIG_HOME`/`~/.config` → `colima`), then the legacy
-    /// `~/.colima`. Returns nil if none exist.
-    private static func readProfileYAML(profile: String) -> String? {
+    /// Candidate Colima home directories in priority order: `$COLIMA_HOME`, the
+    /// modern XDG default (`$XDG_CONFIG_HOME`/`~/.config` → `colima`), then the
+    /// legacy `~/.colima`.
+    private static func candidateHomes() -> [String] {
         let env = ProcessInfo.processInfo.environment
         let home = NSHomeDirectory() as NSString
         var roots: [String] = []
@@ -94,11 +94,28 @@ struct ColimaService {
             ?? home.appendingPathComponent(".config")
         roots.append((configBase as NSString).appendingPathComponent("colima"))
         roots.append(home.appendingPathComponent(".colima"))
-        for root in roots {
+        return roots
+    }
+
+    /// The home to write into: an existing one if present, else the default.
+    private static func colimaHome() -> String {
+        let roots = candidateHomes()
+        return roots.first(where: { FileManager.default.fileExists(atPath: $0) }) ?? roots[0]
+    }
+
+    /// Path to a profile's `colima.yaml` — an existing file if found across the
+    /// candidate homes, otherwise the path under the default home.
+    private static func profileYAMLPath(_ profile: String) -> String {
+        for root in candidateHomes() {
             let path = (root as NSString).appendingPathComponent("\(profile)/colima.yaml")
-            if let yaml = try? String(contentsOfFile: path, encoding: .utf8) { return yaml }
+            if FileManager.default.fileExists(atPath: path) { return path }
         }
-        return nil
+        return (colimaHome() as NSString).appendingPathComponent("\(profile)/colima.yaml")
+    }
+
+    /// Reads a profile's `colima.yaml`. Returns nil if none exists.
+    private static func readProfileYAML(profile: String) -> String? {
+        try? String(contentsOfFile: profileYAMLPath(profile), encoding: .utf8)
     }
 
     /// Extracts a top-level (column-0) scalar from a Colima YAML document,
@@ -175,6 +192,10 @@ struct ColimaService {
     }
 
     func start(_ config: ColimaConfig) async throws {
+        // Write the managed CA-cert provision block into the profile YAML before
+        // starting, so Colima runs it (installs corporate root CAs into the VM)
+        // during this start. Best-effort: a write failure shouldn't block start.
+        try? reconcileCAProvision(profile: config.profile)
         // `colima start [profile]` accepts the profile positionally; starting the
         // default profile also points the `docker` CLI context at this VM.
         var args = [
@@ -218,5 +239,137 @@ struct ColimaService {
 
     func delete(profile: String = "default") async throws {
         try await cli.run("colima", ["delete", "--force", profile], environment: ["PATH": cli.augmentedPATH])
+    }
+
+    // MARK: - CA certificates (corporate-proxy provisioning)
+
+    private static let caBeginMarker = "# maccoli:ca-certs:begin (managed by MacColi — do not edit)"
+    private static let caEndMarker = "# maccoli:ca-certs:end"
+
+    /// Directory holding MacColi-managed root CA certificates. Kept separate from
+    /// any `certs/` directory the user manages by hand so the two never collide.
+    private static func managedCertsDir() -> String {
+        (colimaHome() as NSString).appendingPathComponent("maccoli-certs")
+    }
+
+    /// Filenames of the currently managed root CA certificates.
+    func managedCACertificates() -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: Self.managedCertsDir())) ?? []
+        return names.filter { !$0.hasPrefix(".") }.sorted()
+    }
+
+    /// Copies a certificate into the managed directory, returning its stored name.
+    @discardableResult
+    func addCACertificate(from source: URL) throws -> String {
+        let dir = Self.managedCertsDir()
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let name = Self.sanitizedFilename(source.lastPathComponent)
+        let dest = (dir as NSString).appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: dest) {
+            try FileManager.default.removeItem(atPath: dest)
+        }
+        try FileManager.default.copyItem(atPath: source.path, toPath: dest)
+        return name
+    }
+
+    /// Removes a managed certificate. The VM keeps trusting it until the next start.
+    func removeCACertificate(_ name: String) throws {
+        let dest = (Self.managedCertsDir() as NSString).appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: dest) {
+            try FileManager.default.removeItem(atPath: dest)
+        }
+    }
+
+    /// True if the profile has *hand-authored* provisioning that would be lost on
+    /// VM deletion — used to warn before destructive actions. MacColi's own
+    /// managed CA region is excluded: it's regenerated from `maccoli-certs/` on
+    /// the next start, so it isn't something the user loses.
+    func hasProvisioning(profile: String = "default") -> Bool {
+        guard let yaml = Self.readProfileYAML(profile: profile),
+              let block = Self.topLevelBlock("provision", in: yaml) else { return false }
+        var inManagedRegion = false
+        for line in block {
+            if line.contains("maccoli:ca-certs:begin") { inManagedRegion = true; continue }
+            if line.contains("maccoli:ca-certs:end") { inManagedRegion = false; continue }
+            guard !inManagedRegion else { continue }
+            if line.drop(while: { $0 == " " }).hasPrefix("-") { return true }
+        }
+        return false
+    }
+
+    /// Writes/updates/removes the MacColi-managed provision block in the profile
+    /// YAML to match the current managed certs. No-op if already in sync.
+    func reconcileCAProvision(profile: String = "default") throws {
+        let certs = managedCACertificates()
+        let path = Self.profileYAMLPath(profile)
+        let existing = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+        let updated = Self.applyManagedProvision(to: existing, certs: certs, certsDir: Self.managedCertsDir())
+        guard updated != existing else { return }
+        let dir = (path as NSString).deletingLastPathComponent
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try updated.write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    /// Pure text transform: inserts, replaces, or removes the sentinel-delimited
+    /// managed provision region so the file installs exactly `certs`, leaving any
+    /// user-authored provision entries and the rest of the document untouched.
+    static func applyManagedProvision(to yaml: String, certs: [String], certsDir: String) -> String {
+        var lines = yaml.isEmpty ? [] : yaml.components(separatedBy: "\n")
+        // Drop a single trailing empty element from a final newline so we control it.
+        if lines.last == "" { lines.removeLast() }
+
+        // 1. Remove any existing managed region (by sentinel markers).
+        if let begin = lines.firstIndex(where: { $0.contains("maccoli:ca-certs:begin") }),
+           let end = lines.firstIndex(where: { $0.contains("maccoli:ca-certs:end") }), end >= begin {
+            lines.removeSubrange(begin...end)
+        }
+
+        let region = certs.isEmpty ? [] : managedRegionLines(certs: certs, certsDir: certsDir)
+        guard !region.isEmpty else {
+            return lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")
+        }
+
+        // 2. Insert under an existing top-level `provision:`, or append a new one.
+        if let idx = lines.firstIndex(where: { isProvisionKey($0) }) {
+            if lines[idx].trimmingCharacters(in: .whitespaces) == "provision: []" {
+                lines[idx] = "provision:"
+            }
+            lines.insert(contentsOf: region, at: idx + 1)
+        } else {
+            if let last = lines.last, !last.isEmpty { lines.append("") }
+            lines.append("provision:")
+            lines.append(contentsOf: region)
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    private static func isProvisionKey(_ line: String) -> Bool {
+        guard let first = line.first, first != " ", first != "\t" else { return false }
+        return line.hasPrefix("provision:")
+    }
+
+    /// The managed provision list entry: one `mode: system` script that installs
+    /// every managed cert and refreshes the trust store + container runtime.
+    private static func managedRegionLines(certs: [String], certsDir: String) -> [String] {
+        var script: [String] = []
+        for name in certs {
+            let src = (certsDir as NSString).appendingPathComponent(name)
+            let base = (("maccoli-" + name) as NSString).deletingPathExtension
+            script.append("      install -m644 \(shellSingleQuoted(src)) /usr/local/share/ca-certificates/\(base).crt")
+        }
+        script.append("      update-ca-certificates")
+        script.append("      systemctl restart docker 2>/dev/null || systemctl restart containerd 2>/dev/null || true")
+        return ["  \(caBeginMarker)", "  - mode: system", "    script: |"] + script + ["  \(caEndMarker)"]
+    }
+
+    /// Keeps a copied cert filename safe for a path: basename only, spaces → `_`.
+    private static func sanitizedFilename(_ name: String) -> String {
+        let base = (name as NSString).lastPathComponent
+        let cleaned = base.replacingOccurrences(of: " ", with: "_")
+        return cleaned.isEmpty ? "certificate.pem" : cleaned
+    }
+
+    private static func shellSingleQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }

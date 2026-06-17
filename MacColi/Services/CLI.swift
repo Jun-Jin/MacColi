@@ -28,6 +28,17 @@ enum CLIError: LocalizedError {
             || m.contains("i/o timeout")
             || m.contains("unexpected eof")
     }
+
+    /// True when the failure is the VM not trusting the TLS certificate served by
+    /// the network — typically a corporate proxy doing TLS inspection. Fixed by
+    /// installing the proxy's root CA into the VM (Settings → Custom Root CA).
+    var isCertificateTrust: Bool {
+        guard case .failed(_, let message) = self else { return false }
+        let m = message.lowercased()
+        return m.contains("x509: certificate signed by unknown authority")
+            || m.contains("tls: failed to verify certificate")
+            || m.contains("certificate signed by unknown authority")
+    }
 }
 
 /// Process-wide cache of executable directories discovered from the user's login

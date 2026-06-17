@@ -1,8 +1,21 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(AppState.self) private var state
     @State private var confirmDelete = false
+    @State private var importingCert = false
+
+    /// File types accepted by the CA importer. `.x509Certificate` covers DER/CER;
+    /// PEM is plain text, so `.pem`/`.crt`-style content is allowed via `.text`
+    /// and the broad `.data` fallback (some exporters use generic types).
+    private var certContentTypes: [UTType] {
+        var types: [UTType] = [.x509Certificate, .text, .data]
+        if let pem = UTType(filenameExtension: "pem") { types.append(pem) }
+        if let crt = UTType(filenameExtension: "crt") { types.append(crt) }
+        if let cer = UTType(filenameExtension: "cer") { types.append(cer) }
+        return types
+    }
 
     /// Mount drivers valid for a given backend. virtiofs is macOS+vz only.
     private func allowedMountTypes(for vmType: VMType) -> [MountType] {
@@ -67,6 +80,30 @@ struct SettingsView: View {
                     .disabled(!state.kubernetesEnabled)
             }
 
+            Section("Custom Root CA Certificates") {
+                if state.caCertificates.isEmpty {
+                    Text("No certificates added.")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    ForEach(state.caCertificates, id: \.self) { name in
+                        HStack {
+                            Image(systemName: "lock.shield").foregroundStyle(.secondary)
+                            Text(name).font(.system(.body, design: .monospaced))
+                            Spacer()
+                            Button(role: .destructive) {
+                                state.removeCACertificate(name)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+                Button("Add Certificate…") { importingCert = true }
+                Text("Installs the certificate into the VM's trust store on the next start — the fix for `x509: certificate signed by unknown authority` errors behind a TLS-inspecting corporate proxy. Apply & Restart to take effect now.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section {
                 Text("Changes apply the next time Colima starts. Use Apply to restart now with the new configuration.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -86,11 +123,23 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Settings")
+        .fileImporter(isPresented: $importingCert,
+                      allowedContentTypes: certContentTypes,
+                      allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { state.addCACertificate(url) }
+            case .failure(let error):
+                state.errorMessage = "Couldn't read the certificate: \(error.localizedDescription)"
+            }
+        }
         .alert("Delete Colima VM?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) { state.deleteColima() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This permanently removes the VM and everything inside it. This cannot be undone.")
+            Text(state.hasCustomProvisioning
+                 ? "This permanently removes the VM and everything inside it, including custom provisioning in colima.yaml. This cannot be undone."
+                 : "This permanently removes the VM and everything inside it. This cannot be undone.")
         }
     }
 }

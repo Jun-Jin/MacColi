@@ -53,6 +53,13 @@ struct DashboardView: View {
         .sheet(isPresented: $state.showInstaller) {
             InstallView()
         }
+        // A banner button can request a jump to a panel (e.g. Settings to add a
+        // CA cert); honor it here where the sidebar selection lives, then clear.
+        .onChange(of: state.requestedPanel) { _, panel in
+            guard let panel else { return }
+            selection = panel
+            state.requestedPanel = nil
+        }
     }
 
     @ViewBuilder
@@ -87,6 +94,13 @@ struct StatusBanner: View {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     Text(error).font(.callout).textSelection(.enabled)
                     Spacer()
+                    // Surfaced only for TLS-trust failures: jump straight to the
+                    // Settings section where the root CA is imported.
+                    if state.caCertIssue {
+                        Button("Open Settings") { state.requestedPanel = .settings }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    }
                     Button { state.errorMessage = nil } label: { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.borderless)
                 }

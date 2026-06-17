@@ -22,6 +22,14 @@ final class AppState {
     private(set) var isBusy: Bool = false
     var busyMessage: String = ""
     var errorMessage: String?
+    // Set when an operation failed because the VM doesn't trust the network's
+    // TLS certificate; drives the "add a CA" affordance in the error banner.
+    var caCertIssue: Bool = false
+    // A panel the UI should navigate to (e.g. jumping to Settings from a banner).
+    var requestedPanel: Panel?
+
+    // Managed root CA certificates installed into the VM (corporate proxy fix).
+    private(set) var caCertificates: [String] = []
 
     // In-app installation
     var showInstaller: Bool = false
@@ -79,6 +87,7 @@ final class AppState {
         kubernetesEnabled = d.object(forKey: "config.kubernetesEnabled") as? Bool ?? false
         kubernetesVersion = d.string(forKey: "config.kubernetesVersion") ?? ""
         dnsHostsText = d.string(forKey: "config.dnsHosts") ?? ""
+        caCertificates = colima.managedCACertificates()
     }
 
     var config: ColimaConfig {
@@ -335,7 +344,60 @@ final class AppState {
     func createVolume(_ name: String) { resourceAction("Creating \(name)…") { try await self.docker.createVolume(name) } }
     func removeVolume(_ volume: Volume) { resourceAction("Removing \(volume.name)…") { try await self.docker.removeVolume(volume.name, force: false) } }
 
+    // MARK: - Root CA certificates (corporate proxy fix)
+
+    /// Imports a root CA certificate so it's installed into the VM on the next
+    /// start. Security-scoped access is required because the file comes from an
+    /// NSOpenPanel/fileImporter outside the app's sandbox container.
+    func addCACertificate(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            try colima.addCACertificate(from: url)
+            refreshCACertificates()
+            // The user just supplied the fix; clear the prompt and re-arm so the
+            // banner returns only if a fresh start still fails.
+            caCertIssue = false
+            errorMessage = nil
+        } catch {
+            errorMessage = "Couldn't add the certificate: \(error.localizedDescription)"
+        }
+    }
+
+    /// Removes a managed CA certificate. It stays in the VM until the next start
+    /// rewrites the provision block.
+    func removeCACertificate(_ name: String) {
+        do {
+            try colima.removeCACertificate(name)
+            refreshCACertificates()
+        } catch {
+            errorMessage = "Couldn't remove the certificate: \(error.localizedDescription)"
+        }
+    }
+
+    private func refreshCACertificates() {
+        caCertificates = colima.managedCACertificates()
+    }
+
+    /// True when the profile's `colima.yaml` carries a hand-written `provision`
+    /// block (beyond MacColi's managed CA region), so deleting the VM also
+    /// discards setup the user maintains outside this app.
+    var hasCustomProvisioning: Bool { colima.hasProvisioning() }
+
     // MARK: - Helpers
+
+    /// Turns a raw error into a user-facing message, and flags the CA-trust case
+    /// so the banner can offer to import a certificate. Returns the message and
+    /// whether it was a certificate-trust failure.
+    private func describe(_ error: Error) -> String {
+        if let cliError = error as? CLIError, cliError.isCertificateTrust {
+            caCertIssue = true
+            return "The VM doesn't trust the network's TLS certificate — usually a "
+                + "corporate proxy inspecting traffic. Add the proxy's root CA in "
+                + "Settings, then try again."
+        }
+        return error.localizedDescription
+    }
 
     /// Runs a lifecycle operation with busy/error handling, then refreshes everything.
     private func perform(_ message: String, _ work: @escaping () async throws -> Void) {
@@ -346,7 +408,7 @@ final class AppState {
             defer { isBusy = false; busyMessage = "" }
             do { try await work() }
             catch {
-                errorMessage = error.localizedDescription
+                errorMessage = describe(error)
                 await refresh()
             }
         }
@@ -363,7 +425,7 @@ final class AppState {
                 try await work()
                 await refreshResources()
             } catch {
-                errorMessage = error.localizedDescription
+                errorMessage = describe(error)
             }
         }
     }
