@@ -35,6 +35,10 @@ final class AppState {
     var memoryGiB: Int { didSet { defaults.set(memoryGiB, forKey: "config.memoryGiB") } }
     var diskGiB: Int { didSet { defaults.set(diskGiB, forKey: "config.diskGiB") } }
     var runtime: ContainerRuntime { didSet { defaults.set(runtime.rawValue, forKey: "config.runtime") } }
+    var arch: VMArch { didSet { defaults.set(arch.rawValue, forKey: "config.arch") } }
+    var vmType: VMType { didSet { defaults.set(vmType.rawValue, forKey: "config.vmType") } }
+    var vzRosetta: Bool { didSet { defaults.set(vzRosetta, forKey: "config.vzRosetta") } }
+    var mountType: MountType { didSet { defaults.set(mountType.rawValue, forKey: "config.mountType") } }
 
     @ObservationIgnored private let defaults = UserDefaults.standard
     @ObservationIgnored private let colima = ColimaService()
@@ -48,10 +52,17 @@ final class AppState {
         memoryGiB = d.object(forKey: "config.memoryGiB") as? Int ?? 4
         diskGiB = d.object(forKey: "config.diskGiB") as? Int ?? 60
         runtime = (d.string(forKey: "config.runtime")).flatMap(ContainerRuntime.init) ?? .docker
+        arch = (d.string(forKey: "config.arch")).flatMap(VMArch.init) ?? .aarch64
+        vmType = (d.string(forKey: "config.vmType")).flatMap(VMType.init) ?? .vz
+        vzRosetta = d.object(forKey: "config.vzRosetta") as? Bool ?? true
+        mountType = (d.string(forKey: "config.mountType")).flatMap(MountType.init) ?? .virtiofs
     }
 
     var config: ColimaConfig {
-        ColimaConfig(profile: "default", cpus: cpus, memoryGiB: memoryGiB, diskGiB: diskGiB, runtime: runtime)
+        ColimaConfig(
+            profile: "default", cpus: cpus, memoryGiB: memoryGiB, diskGiB: diskGiB, runtime: runtime,
+            arch: arch, vmType: vmType, vzRosetta: vzRosetta, mountType: mountType
+        )
     }
 
     // MARK: - Polling

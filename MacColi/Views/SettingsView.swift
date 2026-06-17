@@ -19,6 +19,23 @@ struct SettingsView: View {
                         Text(runtime.label).tag(runtime)
                     }
                 }
+                Picker("Architecture", selection: $state.arch) {
+                    ForEach(VMArch.allCases) { arch in
+                        Text(arch.label).tag(arch)
+                    }
+                }
+                Picker("VM Type", selection: $state.vmType) {
+                    ForEach(VMType.allCases) { vmType in
+                        Text(vmType.label).tag(vmType)
+                    }
+                }
+                Picker("Mount Type", selection: $state.mountType) {
+                    ForEach(MountType.allCases) { mountType in
+                        Text(mountType.label).tag(mountType)
+                    }
+                }
+                Toggle("Rosetta 2 (fast linux/amd64)", isOn: $state.vzRosetta)
+                    .disabled(state.vmType != .vz)
             }
 
             Section {

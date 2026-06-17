@@ -27,13 +27,20 @@ struct ColimaService {
     func start(_ config: ColimaConfig) async throws {
         // `colima start [profile]` accepts the profile positionally; starting the
         // default profile also points the `docker` CLI context at this VM.
-        let args = [
+        var args = [
             "start", config.profile,
             "--cpu", String(config.cpus),
             "--memory", String(config.memoryGiB),
             "--disk", String(config.diskGiB),
             "--runtime", config.runtime.rawValue,
+            "--arch", config.arch.rawValue,
+            "--vm-type", config.vmType.rawValue,
+            "--mount-type", config.mountType.rawValue,
         ]
+        // `--vz-rosetta` is a boolean flag and only valid with the `vz` VM type.
+        if config.vzRosetta && config.vmType == .vz {
+            args.append("--vz-rosetta")
+        }
         try await cli.run("colima", args, environment: ["PATH": cli.augmentedPATH])
     }
 

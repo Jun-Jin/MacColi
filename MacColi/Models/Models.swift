@@ -14,6 +14,49 @@ enum ContainerRuntime: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+/// VM CPU architecture (`colima start --arch`).
+enum VMArch: String, CaseIterable, Identifiable, Codable {
+    case aarch64
+    case x86_64
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .aarch64: return "aarch64 (Apple Silicon)"
+        case .x86_64: return "x86_64 (Intel)"
+        }
+    }
+}
+
+/// VM backend (`colima start --vm-type`). `vz` uses Apple's
+/// Virtualization.framework and is faster than the default QEMU.
+enum VMType: String, CaseIterable, Identifiable, Codable {
+    case vz
+    case qemu
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .vz: return "vz (Virtualization.framework)"
+        case .qemu: return "QEMU"
+        }
+    }
+}
+
+/// Host↔VM file-sharing backend (`colima start --mount-type`). `virtiofs`
+/// is the fastest but requires the `vz` VM type.
+enum MountType: String, CaseIterable, Identifiable, Codable {
+    case virtiofs
+    case sshfs
+    case ninep = "9p"
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .virtiofs: return "VirtioFS"
+        case .sshfs: return "sshfs"
+        case .ninep: return "9p"
+        }
+    }
+}
+
 /// One Colima profile, decoded from `colima list --json`.
 struct ColimaInstance: Codable, Identifiable, Equatable {
     let name: String
@@ -36,6 +79,12 @@ struct ColimaConfig: Equatable {
     var memoryGiB: Int = 2
     var diskGiB: Int = 60
     var runtime: ContainerRuntime = .docker
+    var arch: VMArch = .aarch64
+    var vmType: VMType = .vz
+    /// Enables Rosetta 2 inside the VM for fast `linux/amd64` execution. Only
+    /// meaningful with the `vz` VM type on Apple Silicon.
+    var vzRosetta: Bool = true
+    var mountType: MountType = .virtiofs
 }
 
 /// High-level lifecycle state shown in the UI.
