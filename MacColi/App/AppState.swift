@@ -17,6 +17,7 @@ final class AppState {
     private(set) var containers: [Container] = []
     private(set) var images: [DockerImage] = []
     private(set) var volumes: [Volume] = []
+    private(set) var networks: [DockerNetwork] = []
 
     // Live stats (running containers only), keyed by short container id, plus
     // rolling per-container and VM-wide history for sparklines. Populated by a
@@ -370,7 +371,8 @@ final class AppState {
         async let c = try? await docker.containers()
         async let i = try? await docker.images()
         async let v = try? await docker.volumes()
-        let (containers, images, volumes) = await (c, i, v)
+        async let n = try? await docker.networks()
+        let (containers, images, volumes, networks) = await (c, i, v, n)
         // Replace a list only on a successful read. A transient docker failure —
         // e.g. the socket briefly gone while the VM (re)starts, which returns nil —
         // keeps the last-known list instead of flashing the panel empty. A real
@@ -379,6 +381,7 @@ final class AppState {
         if let containers { self.containers = containers }
         if let images { self.images = images }
         if let volumes { self.volumes = volumes }
+        if let networks { self.networks = networks }
     }
 
     /// Refreshes resources, retrying on a short cadence while docker is still
@@ -401,6 +404,7 @@ final class AppState {
         containers = []
         images = []
         volumes = []
+        networks = []
         clearStats()
     }
 
@@ -555,6 +559,11 @@ final class AppState {
     func createVolume(_ name: String) { resourceAction("Creating \(name)…") { try await self.docker.createVolume(name) } }
     func removeVolume(_ volume: Volume) { resourceAction("Removing \(volume.name)…") { try await self.docker.removeVolume(volume.name, force: false) } }
 
+    // MARK: - Network actions
+
+    func createNetwork(_ name: String) { resourceAction("Creating \(name)…") { try await self.docker.createNetwork(name) } }
+    func removeNetwork(_ network: DockerNetwork) { resourceAction("Removing \(network.name)…") { try await self.docker.removeNetwork(network.id) } }
+
     // MARK: - System maintenance
 
     /// Runs `docker system prune --filter until=24h`: reclaims stopped
@@ -597,6 +606,7 @@ final class AppState {
     func removeContainers(_ cs: [Container]) { bulkAction(cs, "Removing \(cs.count) containers…") { try await self.docker.removeContainer($0.id, force: $0.isRunning) } }
     func removeImages(_ imgs: [DockerImage]) { bulkAction(imgs, "Removing \(imgs.count) images…") { try await self.docker.removeImage($0.id, force: true) } }
     func removeVolumes(_ vols: [Volume]) { bulkAction(vols, "Removing \(vols.count) volumes…") { try await self.docker.removeVolume($0.name, force: false) } }
+    func removeNetworks(_ nets: [DockerNetwork]) { bulkAction(nets, "Removing \(nets.count) networks…") { try await self.docker.removeNetwork($0.id) } }
 
     /// Applies `work` to each selected item under a single busy overlay, then
     /// refreshes resources once. Individual failures don't abort the run — the

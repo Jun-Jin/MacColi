@@ -217,6 +217,39 @@ struct Volume: Codable, Identifiable, Equatable {
     }
 }
 
+struct DockerNetwork: Codable, Identifiable, Equatable {
+    let networkID: String
+    let name: String
+    let driver: String
+    let scope: String
+    // "true"/"false" string as docker emits it; surfaced via `isInternal`.
+    let internalFlag: String
+
+    enum CodingKeys: String, CodingKey {
+        case networkID = "ID"
+        case name = "Name"
+        case driver = "Driver"
+        case scope = "Scope"
+        case internalFlag = "Internal"
+    }
+
+    var id: String { networkID }
+
+    /// Docker's built-in networks. They're always present and can't be removed
+    /// (`docker network rm` rejects them), so the UI never offers to delete them.
+    var isPredefined: Bool { ["bridge", "host", "none"].contains(name) }
+
+    /// An internal network has no external connectivity (`--internal`).
+    var isInternal: Bool { internalFlag == "true" }
+
+    /// "bridge · local" style caption, flagging internal-only networks.
+    var subtitle: String {
+        var parts = [driver, scope]
+        if isInternal { parts.append("internal") }
+        return parts.joined(separator: " · ")
+    }
+}
+
 /// A single live resource sample for one running container, parsed from
 /// `docker stats --no-stream`. `id` is the short (12-char) container id, which
 /// matches `Container.id` from `docker ps`.

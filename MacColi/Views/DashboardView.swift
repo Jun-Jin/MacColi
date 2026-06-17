@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum Panel: String, CaseIterable, Identifiable {
-    case containers, images, volumes, settings
+    case containers, images, volumes, networks, settings
     var id: String { rawValue }
 
     var title: String {
@@ -9,6 +9,7 @@ enum Panel: String, CaseIterable, Identifiable {
         case .containers: return "Containers"
         case .images: return "Images"
         case .volumes: return "Volumes"
+        case .networks: return "Networks"
         case .settings: return "Settings"
         }
     }
@@ -18,6 +19,7 @@ enum Panel: String, CaseIterable, Identifiable {
         case .containers: return "shippingbox"
         case .images: return "square.stack.3d.up"
         case .volumes: return "externaldrive"
+        case .networks: return "point.3.connected.trianglepath.dotted"
         case .settings: return "gearshape"
         }
     }
@@ -74,6 +76,7 @@ struct DashboardView: View {
         case .containers: ContainersView()
         case .images: ImagesView()
         case .volumes: VolumesView()
+        case .networks: NetworksView()
         case .settings: SettingsView()
         }
     }

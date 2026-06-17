@@ -133,6 +133,27 @@ struct DockerService {
         try await cli.run("docker", args, environment: env())
     }
 
+    // MARK: Networks
+
+    func networks() async throws -> [DockerNetwork] {
+        let out = try await cli.run("docker", ["network", "ls", "--format", "{{json .}}"], environment: env())
+        // `network ls` returns networks in an unstable order; sort by name so the
+        // list doesn't reshuffle on every refresh (mirrors volumes()).
+        return JSONLines.decode(DockerNetwork.self, from: out)
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func createNetwork(_ name: String) async throws {
+        try await cli.run("docker", ["network", "create", name], environment: env())
+    }
+
+    /// Removes a network by id. No force flag: docker can't remove a network that
+    /// still has attached endpoints, and `--force` only suppresses "not found"
+    /// errors — so a real in-use failure surfaces to the user instead.
+    func removeNetwork(_ id: String) async throws {
+        try await cli.run("docker", ["network", "rm", id], environment: env())
+    }
+
     // MARK: System
 
     /// Reclaims space with `docker system prune`: removes stopped containers,
