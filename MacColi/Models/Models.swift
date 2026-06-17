@@ -177,6 +177,24 @@ struct DockerImage: Codable, Identifiable, Equatable {
     }
 }
 
+/// Parameters for `docker run`, assembled by the Run-container sheet. The string
+/// arrays hold raw rows from the form; DockerService trims and drops the empties,
+/// so the view doesn't have to pre-clean them.
+struct ContainerRunSpec {
+    var image: String
+    var name: String = ""
+    /// Network to attach to (`--network`); empty uses docker's default bridge.
+    var network: String = ""
+    /// "host:container" port publishings (e.g. "8080:80").
+    var ports: [String] = []
+    /// "KEY=value" environment variables.
+    var env: [String] = []
+    /// "host:container" or "volume:container" mounts.
+    var volumes: [String] = []
+    /// Optional command/args override; whitespace-split into argv.
+    var command: String = ""
+}
+
 struct Volume: Codable, Identifiable, Equatable {
     let name: String
     let driver: String

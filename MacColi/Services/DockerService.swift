@@ -34,6 +34,31 @@ struct DockerService {
         }
     }
 
+    /// Creates and starts a container from an image (`docker run`). Always
+    /// detached (`-d`): a GUI process has no TTY to attach to, and a foreground
+    /// `docker run` would block until the container exits. Returns the new
+    /// container id. Docker pulls the image first if it isn't present locally.
+    @discardableResult
+    func runContainer(_ spec: ContainerRunSpec) async throws -> String {
+        func clean(_ items: [String]) -> [String] {
+            items.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        var args = ["run", "-d"]
+        let name = spec.name.trimmingCharacters(in: .whitespaces)
+        if !name.isEmpty { args += ["--name", name] }
+        let network = spec.network.trimmingCharacters(in: .whitespaces)
+        if !network.isEmpty { args += ["--network", network] }
+        for p in clean(spec.ports) { args += ["-p", p] }
+        for e in clean(spec.env) { args += ["-e", e] }
+        for v in clean(spec.volumes) { args += ["-v", v] }
+        args.append(spec.image.trimmingCharacters(in: .whitespaces))
+        let command = spec.command.trimmingCharacters(in: .whitespaces)
+        // argv split — each token is a separate argument (no shell), so simple
+        // commands like "sleep 3600" work; quoted multi-word args are not parsed.
+        if !command.isEmpty { args += command.split(separator: " ").map(String.init) }
+        return try await cli.run("docker", args, environment: env())
+    }
+
     func startContainer(_ id: String) async throws {
         try await cli.run("docker", ["start", id], environment: env())
     }

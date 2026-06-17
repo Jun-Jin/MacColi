@@ -522,6 +522,27 @@ final class AppState {
 
     // MARK: - Container actions
 
+    /// Runs a new container from an image, then jumps to the Containers panel so
+    /// the freshly-started container is visible. Not routed through resourceAction
+    /// because of the panel switch and the success note.
+    func runContainer(_ spec: ContainerRunSpec) {
+        Task {
+            isBusy = true
+            busyMessage = "Running \(spec.image)…"
+            errorMessage = nil
+            infoMessage = nil
+            defer { isBusy = false; busyMessage = "" }
+            do {
+                try await docker.runContainer(spec)
+                await refreshResources()
+                requestedPanel = .containers
+                infoMessage = "Started a container from \(spec.image)."
+            } catch {
+                errorMessage = describe(error)
+            }
+        }
+    }
+
     func startContainer(_ c: Container) { resourceAction("Starting \(c.displayName)…") { try await self.docker.startContainer(c.id) } }
     func stopContainer(_ c: Container) { resourceAction("Stopping \(c.displayName)…") { try await self.docker.stopContainer(c.id) } }
     func restartContainer(_ c: Container) { resourceAction("Restarting \(c.displayName)…") { try await self.docker.restartContainer(c.id) } }

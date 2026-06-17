@@ -14,6 +14,8 @@ struct ImagesView: View {
     @State private var confirmRemove = false
     // Single-row removal awaiting confirmation; non-nil drives the per-image dialog.
     @State private var pendingRemove: DockerImage?
+    // Image to run a container from; non-nil presents the Run sheet, prefilled.
+    @State private var runImage: DockerImage?
 
     /// Images matching the filter, by reference, repository or tag.
     private var filtered: [DockerImage] {
@@ -53,6 +55,11 @@ struct ImagesView: View {
                                 .font(.caption).foregroundStyle(.tertiary)
                         }
                         if !selectMode {
+                            Button { runImage = image } label: {
+                                Image(systemName: "play")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Run a container from this image")
                             Button(role: .destructive) { pendingRemove = image } label: {
                                 Image(systemName: "trash")
                             }
@@ -112,6 +119,9 @@ struct ImagesView: View {
             Button("Cancel", role: .cancel) {}
         } message: { _ in
             Text("Images in use will be force-removed. This cannot be undone.")
+        }
+        .sheet(item: $runImage) { image in
+            RunContainerSheet(image: image.reference)
         }
         .alert("Pull Image", isPresented: $showPull) {
             TextField("e.g. nginx:latest", text: $pullReference)
