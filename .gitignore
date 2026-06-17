@@ -4,6 +4,19 @@
 # Release artifacts (signed/notarized .app, .zip, .dmg)
 /dist/
 
+# Signing / notarization credentials — never commit these. They live in the
+# login keychain and in GitHub Actions secrets, never in the repo.
+*.p12
+*.p8
+*.pem
+*.cer
+*.cert
+*.mobileprovision
+*.keychain
+*.keychain-db
+.env
+*.env
+
 # Xcode
 #
 # gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
