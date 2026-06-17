@@ -380,6 +380,13 @@ final class AppState {
         (try? await docker.logs(c.id)) ?? "Failed to read logs."
     }
 
+    /// Streams `c`'s logs live until the stream ends or the caller's task is
+    /// cancelled. Lines arrive on a background thread, so `onLine` must be safe
+    /// to call off the main actor (the log view buffers them and renders on a timer).
+    func followLogs(for c: Container, onLine: @escaping @Sendable (String) -> Void) async {
+        await docker.followLogs(c.id, onLine: onLine)
+    }
+
     // MARK: - Image actions
 
     func pullImage(_ reference: String) {

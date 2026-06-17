@@ -100,14 +100,29 @@ actor ProcessRunner {
 
         try process.run()
 
-        // `await` on each line keeps the actor reentrant so other work isn't blocked.
-        for try await line in pipe.fileHandleForReading.bytes.lines {
-            onOutput(line)
+        // Terminate the process if the awaiting task is cancelled. Essential for
+        // never-exiting streams like `docker logs --follow`: terminating closes
+        // the pipe, the line loop hits EOF, and the call returns — instead of
+        // leaking the subprocess. Harmless for commands that finish on their own.
+        let box = ProcessBox(process)
+        return try await withTaskCancellationHandler {
+            // `await` on each line keeps the actor reentrant so other work isn't blocked.
+            for try await line in pipe.fileHandleForReading.bytes.lines {
+                onOutput(line)
+            }
+            process.waitUntilExit()
+            return process.terminationStatus
+        } onCancel: {
+            box.process.terminate()
         }
-
-        process.waitUntilExit()
-        return process.terminationStatus
     }
+}
+
+/// Lets a non-`Sendable` `Process` cross into the `@Sendable` cancellation
+/// handler. `terminate()` only sends a signal, so it's safe from any thread.
+private final class ProcessBox: @unchecked Sendable {
+    let process: Process
+    init(_ process: Process) { self.process = process }
 }
 
 /// Thread-safe accumulator for subprocess output, written from background

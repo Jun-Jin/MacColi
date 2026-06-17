@@ -40,6 +40,17 @@ struct DockerService {
         return result.stdout + result.stderr
     }
 
+    /// Streams a container's logs live (`docker logs --follow`), emitting the last
+    /// `tail` lines first and then each new line as it arrives. Returns when the
+    /// stream ends (container stopped/removed) or the awaiting task is cancelled —
+    /// cancellation terminates the underlying process (see ProcessRunner).
+    func followLogs(_ id: String, tail: Int = 500,
+                    onLine: @escaping @Sendable (String) -> Void) async {
+        _ = try? await cli.runStreaming(
+            "docker", ["logs", "--follow", "--tail", String(tail), id],
+            environment: env(), onOutput: onLine)
+    }
+
     // MARK: Images
 
     func images() async throws -> [DockerImage] {
