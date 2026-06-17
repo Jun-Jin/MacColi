@@ -8,7 +8,7 @@ struct ColimaService {
 
     /// All Colima profiles. Empty when none have been created yet.
     func list() async throws -> [ColimaInstance] {
-        let result = try await cli.runRaw("colima", ["list", "--json"], environment: ["PATH": cli.augmentedPATH])
+        let result = try await cli.runRaw("colima", ["list", "--json"], environment: cli.colimaEnvironment())
         // `colima list --json` prints one JSON object per line (NDJSON).
         guard result.succeeded else {
             // A fresh install with no profiles can exit non-zero; treat as empty.
@@ -93,37 +93,27 @@ struct ColimaService {
         return Int((bytes + gib / 2) / gib)
     }
 
-    /// Candidate Colima home directories in Colima's own resolution order:
-    /// `$COLIMA_HOME`, then the legacy `~/.colima` (which Colima prefers and uses
-    /// to *ignore* XDG when it exists), then the XDG default
-    /// (`$XDG_CONFIG_HOME`/`~/.config` → `colima`). Matching this order is what
-    /// keeps the app and the CLI reading/writing the same `colima.yaml`.
+    /// Candidate Colima home directories to *read* an existing `colima.yaml`
+    /// from: the resolved home first (where Colima actually operates, honoring
+    /// the login shell's `COLIMA_HOME`), then the other well-known locations as
+    /// fallbacks so a profile authored elsewhere can still be discovered.
     private static func candidateHomes() -> [String] {
-        let env = ProcessInfo.processInfo.environment
         let home = NSHomeDirectory() as NSString
-        var roots: [String] = []
-        if let explicit = env["COLIMA_HOME"], !explicit.isEmpty { roots.append(explicit) }
+        var roots: [String] = [colimaHome()]
         roots.append(home.appendingPathComponent(".colima"))
+        let env = ProcessInfo.processInfo.environment
         let configBase = env["XDG_CONFIG_HOME"].flatMap { $0.isEmpty ? nil : $0 }
+            ?? ShellPaths.shared.xdgConfigHome
             ?? home.appendingPathComponent(".config")
         roots.append((configBase as NSString).appendingPathComponent("colima"))
-        return roots
+        var seen = Set<String>()
+        return roots.filter { seen.insert($0).inserted }
     }
 
-    /// The home Colima itself operates on: `$COLIMA_HOME` if set; else legacy
-    /// `~/.colima` when it exists (Colima ignores XDG in that case); else the XDG
-    /// default. A fresh install with none present resolves to XDG — Colima's
-    /// modern default — never the legacy path.
-    private static func colimaHome() -> String {
-        let env = ProcessInfo.processInfo.environment
-        let home = NSHomeDirectory() as NSString
-        if let explicit = env["COLIMA_HOME"], !explicit.isEmpty { return explicit }
-        let legacy = home.appendingPathComponent(".colima")
-        if FileManager.default.fileExists(atPath: legacy) { return legacy }
-        let configBase = env["XDG_CONFIG_HOME"].flatMap { $0.isEmpty ? nil : $0 }
-            ?? home.appendingPathComponent(".config")
-        return (configBase as NSString).appendingPathComponent("colima")
-    }
+    /// The home Colima itself operates on. Delegates to the single authoritative
+    /// resolver (which honors the login shell's `COLIMA_HOME`), so the app reads
+    /// and writes the same `colima.yaml` the `colima` CLI does.
+    private static func colimaHome() -> String { CLI.shared.colimaHome }
 
     /// Path to a profile's `colima.yaml` — an existing file if found across the
     /// candidate homes, otherwise the path under the default home.
@@ -248,19 +238,19 @@ struct ColimaService {
         if config.kubernetesEnabled, !config.kubernetesVersion.isEmpty {
             args += ["--kubernetes-version", config.kubernetesVersion]
         }
-        try await cli.run("colima", args, environment: ["PATH": cli.augmentedPATH])
+        try await cli.run("colima", args, environment: cli.colimaEnvironment())
     }
 
     func stop(profile: String = "default") async throws {
-        try await cli.run("colima", ["stop", profile], environment: ["PATH": cli.augmentedPATH])
+        try await cli.run("colima", ["stop", profile], environment: cli.colimaEnvironment())
     }
 
     func restart(profile: String = "default") async throws {
-        try await cli.run("colima", ["restart", profile], environment: ["PATH": cli.augmentedPATH])
+        try await cli.run("colima", ["restart", profile], environment: cli.colimaEnvironment())
     }
 
     func delete(profile: String = "default") async throws {
-        try await cli.run("colima", ["delete", "--force", profile], environment: ["PATH": cli.augmentedPATH])
+        try await cli.run("colima", ["delete", "--force", profile], environment: cli.colimaEnvironment())
     }
 
     // MARK: - CA certificates (corporate-proxy provisioning)

@@ -49,9 +49,21 @@ final class ShellPaths: @unchecked Sendable {
     static let shared = ShellPaths()
     private let lock = NSLock()
     private var dirs: [String] = []
+    // `COLIMA_HOME` / `XDG_CONFIG_HOME` as seen by the login shell. A
+    // Finder-launched app doesn't inherit these, yet they decide which
+    // `colima.yaml` and VM the `colima`/`docker` CLIs operate on, so they must
+    // be discovered the same way the PATH is.
+    private var colimaHomeValue: String?
+    private var xdgConfigHomeValue: String?
 
     var directories: [String] { lock.withLock { dirs } }
     func update(_ newDirs: [String]) { lock.withLock { dirs = newDirs } }
+
+    var colimaHome: String? { lock.withLock { colimaHomeValue } }
+    var xdgConfigHome: String? { lock.withLock { xdgConfigHomeValue } }
+    func updateColima(home: String?, xdg: String?) {
+        lock.withLock { colimaHomeValue = home; xdgConfigHomeValue = xdg }
+    }
 }
 
 /// Locates command-line tools and runs them with a PATH that works even when
@@ -111,16 +123,43 @@ struct CLI {
         return parts.joined(separator: ":")
     }
 
+    /// The Colima home directory the app must operate on, resolved the way Colima
+    /// itself does but seeded from the *login shell's* `COLIMA_HOME` /
+    /// `XDG_CONFIG_HOME` — which a Finder-launched app doesn't otherwise inherit.
+    /// Order: an explicit `COLIMA_HOME` (process env, then login shell) → legacy
+    /// `~/.colima` when it exists → the XDG default. Honoring the shell's
+    /// `COLIMA_HOME` is what keeps the app and the user's terminal pointed at the
+    /// same VM; without it the app falls back to `~/.colima` and sees a different
+    /// (or empty) world than `colima` does in Terminal.
+    var colimaHome: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path as NSString
+        let env = ProcessInfo.processInfo.environment
+        if let explicit = env["COLIMA_HOME"], !explicit.isEmpty { return explicit }
+        if let discovered = ShellPaths.shared.colimaHome, !discovered.isEmpty { return discovered }
+        let legacy = home.appendingPathComponent(".colima")
+        if FileManager.default.fileExists(atPath: legacy) { return legacy }
+        let xdgBase = env["XDG_CONFIG_HOME"].flatMap { $0.isEmpty ? nil : $0 }
+            ?? ShellPaths.shared.xdgConfigHome
+            ?? home.appendingPathComponent(".config")
+        return (xdgBase as NSString).appendingPathComponent("colima")
+    }
+
     /// Path to Colima's docker socket for the default profile, if present.
     var colimaDockerSocket: String? {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let path = "\(home)/.colima/default/docker.sock"
+        let path = (colimaHome as NSString).appendingPathComponent("default/docker.sock")
         return FileManager.default.fileExists(atPath: path) ? path : nil
+    }
+
+    /// Environment for invoking `colima`: augmented PATH plus the resolved
+    /// `COLIMA_HOME`, so the subprocess targets the same home the app reasons
+    /// about rather than re-resolving against its own minimal environment.
+    func colimaEnvironment() -> [String: String] {
+        ["PATH": augmentedPATH, "COLIMA_HOME": colimaHome]
     }
 
     /// Environment for invoking `docker`, routed through Colima's socket when available.
     func dockerEnvironment() -> [String: String] {
-        var env = ["PATH": augmentedPATH]
+        var env = colimaEnvironment()
         if let socket = colimaDockerSocket {
             env["DOCKER_HOST"] = "unix://\(socket)"
         }
@@ -134,15 +173,29 @@ struct CLI {
     func discoverShellPaths() async {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         // `-l` sources login profiles (where `brew shellenv` typically lives).
-        guard let result = try? await runner.run(shell, ["-lc", "echo $PATH"]),
+        // Emit PATH plus the two Colima-home variables as uniquely-keyed lines so
+        // they survive any banner noise an interactive profile may print.
+        let script = "echo \"__CLMC_PATH__=$PATH\"; "
+            + "echo \"__CLMC_COLIMA_HOME__=$COLIMA_HOME\"; "
+            + "echo \"__CLMC_XDG__=$XDG_CONFIG_HOME\""
+        guard let result = try? await runner.run(shell, ["-lc", script]),
               result.succeeded else { return }
-        // Interactive shells may print banners; the PATH is the last non-empty line.
-        let line = result.stdout
-            .split(whereSeparator: \.isNewline)
-            .last(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
-            .map(String.init) ?? ""
-        let dirs = line.split(separator: ":").map(String.init).filter { !$0.isEmpty }
-        if !dirs.isEmpty { ShellPaths.shared.update(dirs) }
+
+        func value(forKey key: String) -> String? {
+            for raw in result.stdout.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
+                let line = String(raw)
+                if line.hasPrefix(key) { return String(line.dropFirst(key.count)) }
+            }
+            return nil
+        }
+
+        if let pathLine = value(forKey: "__CLMC_PATH__=") {
+            let dirs = pathLine.split(separator: ":").map(String.init).filter { !$0.isEmpty }
+            if !dirs.isEmpty { ShellPaths.shared.update(dirs) }
+        }
+        let colimaHome = value(forKey: "__CLMC_COLIMA_HOME__=").flatMap { $0.isEmpty ? nil : $0 }
+        let xdg = value(forKey: "__CLMC_XDG__=").flatMap { $0.isEmpty ? nil : $0 }
+        ShellPaths.shared.updateColima(home: colimaHome, xdg: xdg)
     }
 
     // MARK: - Running
