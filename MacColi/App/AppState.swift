@@ -36,7 +36,14 @@ final class AppState {
     var diskGiB: Int { didSet { defaults.set(diskGiB, forKey: "config.diskGiB") } }
     var runtime: ContainerRuntime { didSet { defaults.set(runtime.rawValue, forKey: "config.runtime") } }
     var arch: VMArch { didSet { defaults.set(arch.rawValue, forKey: "config.arch") } }
-    var vmType: VMType { didSet { defaults.set(vmType.rawValue, forKey: "config.vmType") } }
+    var vmType: VMType {
+        didSet {
+            defaults.set(vmType.rawValue, forKey: "config.vmType")
+            // virtiofs requires the vz backend; fall back to sshfs (Colima's qemu
+            // default) so the selection can't form a combination Colima rejects.
+            if vmType != .vz, mountType == .virtiofs { mountType = .sshfs }
+        }
+    }
     var vzRosetta: Bool { didSet { defaults.set(vzRosetta, forKey: "config.vzRosetta") } }
     var mountType: MountType { didSet { defaults.set(mountType.rawValue, forKey: "config.mountType") } }
 

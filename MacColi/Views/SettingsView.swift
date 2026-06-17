@@ -4,6 +4,11 @@ struct SettingsView: View {
     @Environment(AppState.self) private var state
     @State private var confirmDelete = false
 
+    /// Mount drivers valid for a given backend. virtiofs is macOS+vz only.
+    private func allowedMountTypes(for vmType: VMType) -> [MountType] {
+        vmType == .vz ? MountType.allCases : MountType.allCases.filter { $0 != .virtiofs }
+    }
+
     var body: some View {
         // `@Bindable` exposes bindings ($state.cpus, …) for an @Observable object
         // obtained from the environment.
@@ -30,12 +35,16 @@ struct SettingsView: View {
                     }
                 }
                 Picker("Mount Type", selection: $state.mountType) {
-                    ForEach(MountType.allCases) { mountType in
+                    // virtiofs is only valid with the vz backend, so it's hidden
+                    // under qemu to keep the selection startable.
+                    ForEach(allowedMountTypes(for: state.vmType)) { mountType in
                         Text(mountType.label).tag(mountType)
                     }
                 }
                 Toggle("Rosetta 2 (fast linux/amd64)", isOn: $state.vzRosetta)
                     .disabled(state.vmType != .vz)
+                Text("Architecture, VM type, mount type, and runtime are fixed once the VM is created — changing them only takes effect on a fresh VM.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section {
