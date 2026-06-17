@@ -52,24 +52,31 @@ private struct ContainerRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Circle()
-                .fill(container.isRunning ? Color.green : Color.secondary)
-                .frame(width: 9, height: 9)
+            // Tapping anywhere across the info area opens logs; the trailing
+            // controls sit outside this region so their clicks aren't hijacked.
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(container.isRunning ? Color.green : Color.secondary)
+                    .frame(width: 9, height: 9)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(container.displayName).font(.body.weight(.medium))
-                Text(container.image).font(.caption).foregroundStyle(.secondary)
-                if !container.ports.isEmpty {
-                    Text(container.ports).font(.caption2).foregroundStyle(.tertiary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(container.displayName).font(.body.weight(.medium))
+                    Text(container.image).font(.caption).foregroundStyle(.secondary)
+                    if !container.ports.isEmpty {
+                        Text(container.ports).font(.caption2).foregroundStyle(.tertiary)
+                    }
                 }
+
+                Spacer()
+
+                Text(container.status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-
-            Spacer()
-
-            Text(container.status)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: showLogs)
+            .help("View logs")
 
             actions
         }
