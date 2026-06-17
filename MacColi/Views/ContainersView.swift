@@ -6,16 +6,19 @@ struct ContainersView: View {
     @State private var search = ""
     // Driven by the ⌘F command; setting it true focuses the search field on macOS.
     @State private var searchPresented = false
+    @State private var statusFilter: StatusFilter = .all
 
-    /// Containers matching the filter, by name, image, status or ports.
+    /// Containers matching the status filter and, if any, the text query (by
+    /// name, image, status or ports).
     private var filtered: [Container] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return state.containers }
-        return state.containers.filter {
-            $0.displayName.lowercased().contains(q)
-                || $0.image.lowercased().contains(q)
-                || $0.status.lowercased().contains(q)
-                || $0.ports.lowercased().contains(q)
+        return state.containers.filter { c in
+            guard statusFilter.matches(c) else { return false }
+            guard !q.isEmpty else { return true }
+            return c.displayName.lowercased().contains(q)
+                || c.image.lowercased().contains(q)
+                || c.status.lowercased().contains(q)
+                || c.ports.lowercased().contains(q)
         }
     }
 
@@ -27,7 +30,13 @@ struct ContainersView: View {
                 ContentUnavailableView("No containers", systemImage: "shippingbox",
                                        description: Text("Run a container to see it here."))
             } else if filtered.isEmpty {
-                ContentUnavailableView.search(text: search)
+                if search.isEmpty {
+                    ContentUnavailableView("No \(statusFilter.label.lowercased()) containers",
+                                           systemImage: "shippingbox",
+                                           description: Text("No containers match this filter."))
+                } else {
+                    ContentUnavailableView.search(text: search)
+                }
             } else {
                 List(filtered) { container in
                     ContainerRow(container: container) { openWindow(value: container) }
@@ -38,7 +47,38 @@ struct ContainersView: View {
         .navigationTitle("Containers")
         .searchable(text: $search, isPresented: $searchPresented, placement: .toolbar, prompt: "Filter containers")
         .onChange(of: state.findRequestToken) { searchPresented = true }
-        .toolbar { RefreshButton() }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Status", selection: $statusFilter) {
+                    ForEach(StatusFilter.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+            RefreshButton()
+        }
+    }
+}
+
+/// Container list filter by run state.
+private enum StatusFilter: String, CaseIterable, Identifiable {
+    case all, running, stopped
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all: return "All"
+        case .running: return "Running"
+        case .stopped: return "Stopped"
+        }
+    }
+
+    func matches(_ c: Container) -> Bool {
+        switch self {
+        case .all: return true
+        case .running: return c.isRunning
+        case .stopped: return !c.isRunning
+        }
     }
 }
 
