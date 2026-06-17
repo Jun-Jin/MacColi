@@ -180,6 +180,32 @@ final class AppState {
         guard !didSyncLiveConfig else { return }
         guard let live = await colima.currentConfig() else { return }
         didSyncLiveConfig = true
+        applyLiveConfig(live)
+    }
+
+    /// Manually re-reads the live VM's `colima.yaml` and overwrites the editable
+    /// Settings fields — the on-demand counterpart to the once-per-launch
+    /// auto-sync. Lets the user pull in edits made to `colima.yaml` outside the
+    /// app without relaunching; any unsaved edits in the panel are intentionally
+    /// discarded in favor of what's on disk.
+    func reloadConfigFromVM() {
+        Task {
+            isBusy = true
+            busyMessage = "Reloading from colima.yaml…"
+            errorMessage = nil
+            defer { isBusy = false; busyMessage = "" }
+            guard let live = await colima.currentConfig() else {
+                errorMessage = "No Colima profile was found to read configuration from."
+                return
+            }
+            applyLiveConfig(live)
+            didSyncLiveConfig = true
+            refreshCACertificates()
+        }
+    }
+
+    /// Copies a config snapshot into the editable Settings fields.
+    private func applyLiveConfig(_ live: ColimaConfig) {
         cpus = live.cpus
         memoryGiB = live.memoryGiB
         diskGiB = live.diskGiB

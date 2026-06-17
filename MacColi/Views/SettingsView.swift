@@ -105,11 +105,13 @@ struct SettingsView: View {
             }
 
             Section {
-                Text("Changes apply the next time Colima starts. Use Apply to restart now with the new configuration.")
+                Text("Changes apply the next time Colima starts. Apply restarts now with the new configuration. Reload re-reads the VM's colima.yaml from disk, discarding edits made here.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Apply & Restart") { state.applyConfig() }
                         .disabled(!state.colimaState.isRunning || state.isBusy)
+                    Button("Reload from colima.yaml") { state.reloadConfigFromVM() }
+                        .disabled(state.colimaState == .notInstalled || state.isBusy)
                     Spacer()
                 }
             }
