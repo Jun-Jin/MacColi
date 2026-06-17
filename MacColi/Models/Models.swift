@@ -216,3 +216,27 @@ struct Volume: Codable, Identifiable, Equatable {
         }
     }
 }
+
+/// A single live resource sample for one running container, parsed from
+/// `docker stats --no-stream`. `id` is the short (12-char) container id, which
+/// matches `Container.id` from `docker ps`.
+struct ContainerStats: Equatable {
+    let id: String
+    let cpuPercent: Double      // relative to one core; 100 % == one full core
+    let memUsedBytes: Int64
+    let memLimitBytes: Int64
+    let memPercent: Double
+}
+
+/// Aggregate VM-wide usage: the sum of running containers' consumption measured
+/// against the Colima VM's allocated budget. Fractions are uncapped so a
+/// sparkline can show genuine spikes; clamp at the call site for bar widths.
+struct VMUsage: Equatable {
+    let cpuCoresUsed: Double
+    let cpuCoresTotal: Int
+    let memUsedBytes: Int64
+    let memTotalBytes: Int64
+
+    var cpuFraction: Double { cpuCoresTotal > 0 ? cpuCoresUsed / Double(cpuCoresTotal) : 0 }
+    var memFraction: Double { memTotalBytes > 0 ? Double(memUsedBytes) / Double(memTotalBytes) : 0 }
+}

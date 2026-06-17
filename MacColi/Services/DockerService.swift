@@ -15,6 +15,25 @@ struct DockerService {
         return JSONLines.decode(Container.self, from: out)
     }
 
+    /// One-shot live resource sample for the running containers
+    /// (`docker stats --no-stream`). Only running containers appear. This walks a
+    /// short sampling window in the daemon (~1-2s), so it is materially slower
+    /// than `docker ps` — call it on its own cadence, not the main refresh loop.
+    func containerStats() async throws -> [ContainerStats] {
+        let out = try await cli.run("docker", ["stats", "--no-stream", "--format", "{{json .}}"],
+                                    environment: env())
+        return JSONLines.decode(RawStats.self, from: out).map { raw in
+            let mem = raw.memUsage.split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }
+            return ContainerStats(
+                id: raw.id,
+                cpuPercent: Format.parsePercent(raw.cpuPerc) ?? 0,
+                memUsedBytes: mem.first.flatMap(Format.parseBytes) ?? 0,
+                memLimitBytes: mem.count > 1 ? (Format.parseBytes(mem[1]) ?? 0) : 0,
+                memPercent: Format.parsePercent(raw.memPerc) ?? 0
+            )
+        }
+    }
+
     func startContainer(_ id: String) async throws {
         try await cli.run("docker", ["start", id], environment: env())
     }
@@ -168,5 +187,21 @@ struct DockerService {
     /// Wraps a value in single quotes for safe inclusion in a shell script.
     private func shellQuoted(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+}
+
+/// Raw `docker stats` row as emitted by `--format '{{json .}}'`; the string
+/// fields ("3.80%", "467.8MiB / 11.66GiB") are parsed into `ContainerStats`.
+private struct RawStats: Decodable {
+    let id: String
+    let cpuPerc: String
+    let memUsage: String
+    let memPerc: String
+
+    enum CodingKeys: String, CodingKey {
+        case id = "ID"
+        case cpuPerc = "CPUPerc"
+        case memUsage = "MemUsage"
+        case memPerc = "MemPerc"
     }
 }

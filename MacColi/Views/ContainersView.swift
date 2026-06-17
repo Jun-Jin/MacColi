@@ -32,6 +32,8 @@ struct ContainersView: View {
     private var selected: [Container] { filtered.filter { selection.contains($0.id) } }
 
     var body: some View {
+        VStack(spacing: 0) {
+        if state.colimaState.isRunning { VMResourceSummary() }
         Group {
             if !state.colimaState.isRunning {
                 RequiresColimaView(noun: "containers")
@@ -59,9 +61,12 @@ struct ContainersView: View {
                 .listStyle(.inset)
             }
         }
+        }
         .navigationTitle("Containers")
         .searchable(text: $search, isPresented: $searchPresented, placement: .toolbar, prompt: "Filter containers")
         .onChange(of: state.findRequestToken) { searchPresented = true }
+        .onAppear { state.setStatsPanelVisible(true) }
+        .onDisappear { state.setStatsPanelVisible(false) }
         .safeAreaInset(edge: .bottom) {
             if selectMode {
                 SelectionBar(count: selected.count, total: filtered.count,
@@ -168,6 +173,26 @@ private struct ContainerRow: View {
 
                 Spacer()
 
+                if container.isRunning, let s = state.stats[container.id] {
+                    VStack(alignment: .trailing, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(String(format: "%.1f%%", s.cpuPercent))
+                                .font(.caption.weight(.medium)).monospacedDigit()
+                                .foregroundStyle(loadColor(s.cpuPercent))
+                            Sparkline(values: state.cpuHistory[container.id] ?? [], color: .blue)
+                                .frame(width: 40, height: 14)
+                        }
+                        HStack(spacing: 6) {
+                            Text(Format.bytes(s.memUsedBytes))
+                                .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                            Sparkline(values: state.memHistory[container.id] ?? [], color: .green, ceiling: 100)
+                                .frame(width: 40, height: 14)
+                        }
+                    }
+                    .help(String(format: "CPU %.1f%% · Memory %@ (%.1f%%)",
+                                 s.cpuPercent, Format.bytes(s.memUsedBytes), s.memPercent))
+                }
+
                 Text(container.status)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -190,6 +215,16 @@ private struct ContainerRow: View {
             Text(container.isRunning
                  ? "This container is running and will be force-removed. This cannot be undone."
                  : "This cannot be undone.")
+        }
+    }
+
+    /// Amber/red tint for CPU pressure; plain otherwise (per-core percentage,
+    /// so the thresholds are deliberately generous).
+    private func loadColor(_ cpuPercent: Double) -> Color {
+        switch cpuPercent {
+        case 150...: return .red
+        case 80...: return .orange
+        default: return .primary
         }
     }
 
@@ -216,6 +251,51 @@ private struct ContainerRow: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+    }
+}
+
+/// VM-wide CPU and memory usage, summed across running containers and shown
+/// against the Colima VM's allocated budget. Renders nothing until the first
+/// stats sample arrives. Disk is intentionally omitted for now.
+private struct VMResourceSummary: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        if let usage = state.vmUsage {
+            HStack(alignment: .top, spacing: 24) {
+                meter(title: "CPU", fraction: usage.cpuFraction,
+                      caption: String(format: "%.1f / %d cores", usage.cpuCoresUsed, usage.cpuCoresTotal),
+                      history: state.vmCPUHistory, color: .blue)
+                meter(title: "Memory", fraction: usage.memFraction,
+                      caption: "\(Format.bytes(usage.memUsedBytes)) / \(Format.bytes(usage.memTotalBytes))",
+                      history: state.vmMemHistory, color: .green)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .background(.quaternary.opacity(0.4))
+            Divider()
+        }
+    }
+
+    private func meter(title: String, fraction: Double, caption: String,
+                       history: [Double], color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int((fraction * 100).rounded()))%")
+                    .font(.caption.weight(.semibold)).monospacedDigit()
+                    .foregroundStyle(fraction >= 0.85 ? .orange : .primary)
+            }
+            ProgressView(value: min(max(fraction, 0), 1)).tint(color)
+            HStack(spacing: 8) {
+                Text(caption).font(.caption2).foregroundStyle(.tertiary)
+                Spacer()
+                // Shared 0-100 % ceiling so CPU and memory trends read on one scale.
+                Sparkline(values: history, color: color, ceiling: 100)
+                    .frame(width: 72, height: 16)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

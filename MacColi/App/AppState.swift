@@ -18,6 +18,16 @@ final class AppState {
     private(set) var images: [DockerImage] = []
     private(set) var volumes: [Volume] = []
 
+    // Live stats (running containers only), keyed by short container id, plus
+    // rolling per-container and VM-wide history for sparklines. Populated by a
+    // dedicated, slower loop that runs only while the Containers panel is on
+    // screen — `docker stats` is too costly for the main refresh cadence.
+    private(set) var stats: [String: ContainerStats] = [:]
+    private(set) var cpuHistory: [String: [Double]] = [:]
+    private(set) var memHistory: [String: [Double]] = [:]
+    private(set) var vmCPUHistory: [Double] = []
+    private(set) var vmMemHistory: [Double] = []
+
     // UI feedback
     private(set) var isBusy: Bool = false
     var busyMessage: String = ""
@@ -73,6 +83,13 @@ final class AppState {
     @ObservationIgnored private let colima = ColimaService()
     @ObservationIgnored private let docker = DockerService()
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+    // The stats loop runs only when both are true: the Containers panel is
+    // visible and the window is frontmost. See reconcileStatsMonitoring.
+    @ObservationIgnored private var statsTask: Task<Void, Never>?
+    @ObservationIgnored private var statsPanelVisible = false
+    @ObservationIgnored private var statsSceneActive = true
+    // Samples retained per series for sparklines.
+    @ObservationIgnored private static let historyLength = 40
     // Polling cadence (seconds): fast while the dashboard is frontmost, slow when
     // it isn't. Each poll spawns colima/docker subprocesses that round-trip into
     // the VM, so backing off when no one is watching avoids needless VM (and
@@ -160,6 +177,8 @@ final class AppState {
     /// menu-bar status roughly current — instead of spawning subprocesses into
     /// the VM every few seconds. Returning to the foreground refreshes at once.
     func setActivePolling(_ active: Bool) {
+        statsSceneActive = active
+        reconcileStatsMonitoring()
         let target: TimeInterval = active ? 4 : 30
         guard target != pollInterval else { return }
         pollInterval = target
@@ -167,6 +186,81 @@ final class AppState {
         // data immediately rather than waiting out the previous (slow) delay.
         if active, !isBusy { Task { await refresh() } }
     }
+
+    // MARK: - Live stats monitoring
+
+    /// Called by the Containers panel as it appears/disappears. Stats are only
+    /// worth collecting while that panel is on screen, so this gates the
+    /// expensive `docker stats` loop on visibility (combined with scene focus).
+    func setStatsPanelVisible(_ visible: Bool) {
+        statsPanelVisible = visible
+        reconcileStatsMonitoring()
+    }
+
+    /// Starts the stats loop when the panel is visible and the window is
+    /// frontmost; tears it down otherwise. Idempotent.
+    private func reconcileStatsMonitoring() {
+        let shouldRun = statsPanelVisible && statsSceneActive
+        if shouldRun {
+            guard statsTask == nil else { return }
+            statsTask = Task { [weak self] in await self?.runStatsLoop() }
+        } else {
+            statsTask?.cancel()
+            statsTask = nil
+        }
+    }
+
+    /// Samples `docker stats` until cancelled. The call itself costs ~1-2 s (the
+    /// daemon's own sampling window, scaling with container count), so the 5 s
+    /// sleep keeps the effective cycle ~7 s and the daemon's duty cycle low
+    /// (~28 %) — slower than the 4 s lifecycle poll on purpose: this is trend
+    /// data you glance at, not action feedback you wait on.
+    private func runStatsLoop() async {
+        while !Task.isCancelled {
+            if colimaState.isRunning, dockerInstalled,
+               let snapshot = try? await docker.containerStats() {
+                applyStats(snapshot)
+            }
+            try? await Task.sleep(for: .seconds(5))
+        }
+    }
+
+    /// Folds a fresh sample into the current map and the rolling histories,
+    /// dropping history for containers that are no longer running.
+    private func applyStats(_ snapshot: [ContainerStats]) {
+        let live = Set(snapshot.map(\.id))
+        var byID: [String: ContainerStats] = [:]
+        for s in snapshot {
+            byID[s.id] = s
+            cpuHistory[s.id, default: []].appendCapped(s.cpuPercent, max: Self.historyLength)
+            memHistory[s.id, default: []].appendCapped(s.memPercent, max: Self.historyLength)
+        }
+        stats = byID
+        cpuHistory = cpuHistory.filter { live.contains($0.key) }
+        memHistory = memHistory.filter { live.contains($0.key) }
+        if let usage = computeVMUsage(snapshot) {
+            vmCPUHistory.appendCapped(usage.cpuFraction * 100, max: Self.historyLength)
+            vmMemHistory.appendCapped(usage.memFraction * 100, max: Self.historyLength)
+        }
+    }
+
+    /// Sums running containers' usage against the VM's allocated budget (cores
+    /// and memory from `colima list --json`). Nil unless the VM is running.
+    private func computeVMUsage(_ snapshot: [ContainerStats]) -> VMUsage? {
+        guard case let .running(instance) = colimaState else { return nil }
+        let coresUsed = snapshot.reduce(0.0) { $0 + $1.cpuPercent } / 100.0
+        let memUsed = snapshot.reduce(Int64(0)) { $0 + $1.memUsedBytes }
+        return VMUsage(
+            cpuCoresUsed: coresUsed,
+            cpuCoresTotal: instance.cpus ?? 0,
+            memUsedBytes: memUsed,
+            // Fall back to the limit docker reports when colima omits memory.
+            memTotalBytes: instance.memory ?? (snapshot.map(\.memLimitBytes).max() ?? 0)
+        )
+    }
+
+    /// Current VM-wide usage for the summary header.
+    var vmUsage: VMUsage? { computeVMUsage(Array(stats.values)) }
 
     // MARK: - Refresh
 
@@ -286,6 +380,11 @@ final class AppState {
         containers = []
         images = []
         volumes = []
+        stats = [:]
+        cpuHistory = [:]
+        memHistory = [:]
+        vmCPUHistory = []
+        vmMemHistory = []
     }
 
     // MARK: - Colima lifecycle
@@ -634,5 +733,14 @@ final class AppState {
                 errorMessage = describe(error)
             }
         }
+    }
+}
+
+private extension Array {
+    /// Appends an element and trims from the front so the array never exceeds
+    /// `max` — a fixed-size rolling window for sparkline series.
+    mutating func appendCapped(_ element: Element, max: Int) {
+        append(element)
+        if count > max { removeFirst(count - max) }
     }
 }
