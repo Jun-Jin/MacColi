@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContainersView: View {
     @Environment(AppState.self) private var state
-    @State private var logTarget: Container?
+    @Environment(\.openWindow) private var openWindow
     @State private var search = ""
     // Driven by the ⌘F command; setting it true focuses the search field on macOS.
     @State private var searchPresented = false
@@ -30,7 +30,7 @@ struct ContainersView: View {
                 ContentUnavailableView.search(text: search)
             } else {
                 List(filtered) { container in
-                    ContainerRow(container: container) { logTarget = container }
+                    ContainerRow(container: container) { openWindow(value: container) }
                 }
                 .listStyle(.inset)
             }
@@ -39,9 +39,6 @@ struct ContainersView: View {
         .searchable(text: $search, isPresented: $searchPresented, placement: .toolbar, prompt: "Filter containers")
         .onChange(of: state.findRequestToken) { searchPresented = true }
         .toolbar { RefreshButton() }
-        .sheet(item: $logTarget) { container in
-            LogsView(container: container)
-        }
     }
 }
 

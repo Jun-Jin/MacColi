@@ -133,7 +133,7 @@ enum ColimaState: Equatable {
 
 // MARK: - Docker
 
-struct Container: Codable, Identifiable, Equatable {
+struct Container: Codable, Identifiable, Hashable {
     let id: String
     let image: String
     let names: String

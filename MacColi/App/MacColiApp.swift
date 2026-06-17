@@ -28,6 +28,15 @@ struct MacColiApp: App {
             }
         }
 
+        // Per-container log windows. A real window (not a sheet) is resizable and
+        // remembers its size; opened with openWindow(value:) from the list.
+        WindowGroup("Container Logs", for: Container.self) { $container in
+            if let container {
+                LogsView(container: container)
+                    .environment(state)
+            }
+        }
+
         // Menu bar status item.
         MenuBarExtra {
             MenuBarView()
