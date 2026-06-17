@@ -182,13 +182,37 @@ struct Volume: Codable, Identifiable, Equatable {
     let driver: String
     let mountpoint: String
     let scope: String
+    // Populated by `docker system df -v` (disk usage + reference count). Optional
+    // because a plain `docker volume ls` listing omits them.
+    let size: String?
+    let links: String?
 
     enum CodingKeys: String, CodingKey {
         case name = "Name"
         case driver = "Driver"
         case mountpoint = "Mountpoint"
         case scope = "Scope"
+        case size = "Size"
+        case links = "Links"
     }
 
     var id: String { name }
+
+    /// On-disk size as reported by docker (e.g. "2.82MB"), or "—" when unknown.
+    var displaySize: String {
+        guard let size, !size.isEmpty, size != "N/A" else { return "—" }
+        return size
+    }
+
+    /// Number of containers referencing this volume; non-numeric ("N/A") → 0.
+    var linkCount: Int { Int(links ?? "") ?? 0 }
+
+    /// Reference-count caption, e.g. "Unused", "1 container", "3 containers".
+    var usageSubtitle: String {
+        switch linkCount {
+        case 0: return "Unused"
+        case 1: return "1 container"
+        default: return "\(linkCount) containers"
+        }
+    }
 }

@@ -49,7 +49,12 @@ struct VolumesView: View {
                                 .lineLimit(1).truncationMode(.middle)
                         }
                         Spacer()
-                        Text(volume.driver).font(.caption).foregroundStyle(.tertiary)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(volume.displaySize)
+                                .font(.callout.weight(.medium)).monospacedDigit()
+                            Text(volume.usageSubtitle)
+                                .font(.caption).foregroundStyle(.tertiary)
+                        }
                         if !selectMode {
                             Button(role: .destructive) { state.removeVolume(volume) } label: {
                                 Image(systemName: "trash")

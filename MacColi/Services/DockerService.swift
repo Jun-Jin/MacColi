@@ -89,9 +89,18 @@ struct DockerService {
 
     // MARK: Volumes
 
+    /// Lists volumes via `docker system df -v` rather than `docker volume ls` so
+    /// each volume carries its on-disk `Size` and `Links` (container reference
+    /// count). The verbose df emits the same set of volumes plus those fields;
+    /// `{{json .Volumes}}` renders them as a single JSON array (not JSON-lines).
     func volumes() async throws -> [Volume] {
-        let out = try await cli.run("docker", ["volume", "ls", "--format", "{{json .}}"], environment: env())
-        return JSONLines.decode(Volume.self, from: out)
+        let out = try await cli.run("docker", ["system", "df", "-v", "--format", "{{json .Volumes}}"],
+                                    environment: env())
+        guard let data = out.data(using: .utf8),
+              let vols = try? JSONDecoder().decode([Volume].self, from: data) else { return [] }
+        // df -v returns volumes in an unstable order between calls; sort by name
+        // so the list doesn't reshuffle (and flash) on every refresh.
+        return vols.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     func createVolume(_ name: String) async throws {
