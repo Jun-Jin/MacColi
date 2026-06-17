@@ -75,6 +75,12 @@ struct ColimaInstance: Codable, Identifiable, Equatable {
 }
 
 /// Desired VM configuration used when (re)starting Colima.
+/// A custom DNS name → target mapping (`colima start --dns-host host=target`).
+struct DNSHostMapping: Equatable {
+    var host: String
+    var target: String
+}
+
 struct ColimaConfig: Equatable {
     var profile: String = "default"
     var cpus: Int = 2
@@ -87,6 +93,18 @@ struct ColimaConfig: Equatable {
     /// meaningful with the `vz` VM type on Apple Silicon.
     var vzRosetta: Bool = true
     var mountType: MountType = .virtiofs
+    /// Custom VM hostname; empty uses Colima's default (`colima`).
+    var hostname: String = ""
+    /// Assign a host-reachable IP address to the VM (`--network-address`).
+    var networkAddress: Bool = false
+    /// Custom DNS name resolutions (`--dns-host`).
+    var dnsHosts: [DNSHostMapping] = []
+    /// Forward the host's SSH agent into the VM (`--ssh-agent`).
+    var sshAgent: Bool = false
+    /// Start with Kubernetes (k3s) enabled (`--kubernetes`).
+    var kubernetesEnabled: Bool = false
+    /// k3s version to use; empty uses Colima's default.
+    var kubernetesVersion: String = ""
 }
 
 /// High-level lifecycle state shown in the UI.

@@ -46,6 +46,13 @@ final class AppState {
     }
     var vzRosetta: Bool { didSet { defaults.set(vzRosetta, forKey: "config.vzRosetta") } }
     var mountType: MountType { didSet { defaults.set(mountType.rawValue, forKey: "config.mountType") } }
+    var hostname: String { didSet { defaults.set(hostname, forKey: "config.hostname") } }
+    var networkAddress: Bool { didSet { defaults.set(networkAddress, forKey: "config.networkAddress") } }
+    var sshAgent: Bool { didSet { defaults.set(sshAgent, forKey: "config.sshAgent") } }
+    var kubernetesEnabled: Bool { didSet { defaults.set(kubernetesEnabled, forKey: "config.kubernetesEnabled") } }
+    var kubernetesVersion: String { didSet { defaults.set(kubernetesVersion, forKey: "config.kubernetesVersion") } }
+    // One `host=target` per line; parsed into `DNSHostMapping`s for the config.
+    var dnsHostsText: String { didSet { defaults.set(dnsHostsText, forKey: "config.dnsHosts") } }
 
     @ObservationIgnored private let defaults = UserDefaults.standard
     @ObservationIgnored private let colima = ColimaService()
@@ -66,13 +73,38 @@ final class AppState {
         vmType = (d.string(forKey: "config.vmType")).flatMap(VMType.init) ?? .vz
         vzRosetta = d.object(forKey: "config.vzRosetta") as? Bool ?? true
         mountType = (d.string(forKey: "config.mountType")).flatMap(MountType.init) ?? .virtiofs
+        hostname = d.string(forKey: "config.hostname") ?? ""
+        networkAddress = d.object(forKey: "config.networkAddress") as? Bool ?? false
+        sshAgent = d.object(forKey: "config.sshAgent") as? Bool ?? false
+        kubernetesEnabled = d.object(forKey: "config.kubernetesEnabled") as? Bool ?? false
+        kubernetesVersion = d.string(forKey: "config.kubernetesVersion") ?? ""
+        dnsHostsText = d.string(forKey: "config.dnsHosts") ?? ""
     }
 
     var config: ColimaConfig {
         ColimaConfig(
             profile: "default", cpus: cpus, memoryGiB: memoryGiB, diskGiB: diskGiB, runtime: runtime,
-            arch: arch, vmType: vmType, vzRosetta: vzRosetta, mountType: mountType
+            arch: arch, vmType: vmType, vzRosetta: vzRosetta, mountType: mountType,
+            hostname: hostname.trimmingCharacters(in: .whitespaces),
+            networkAddress: networkAddress,
+            dnsHosts: Self.parseDNSHosts(dnsHostsText),
+            sshAgent: sshAgent,
+            kubernetesEnabled: kubernetesEnabled,
+            kubernetesVersion: kubernetesVersion.trimmingCharacters(in: .whitespaces)
         )
+    }
+
+    /// Parses the `host=target` lines of the DNS-hosts editor into mappings,
+    /// skipping blanks and malformed entries.
+    private static func parseDNSHosts(_ text: String) -> [DNSHostMapping] {
+        text.split(whereSeparator: \.isNewline).compactMap { line in
+            let parts = line.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { return nil }
+            let host = parts[0].trimmingCharacters(in: .whitespaces)
+            let target = parts[1].trimmingCharacters(in: .whitespaces)
+            guard !host.isEmpty, !target.isEmpty else { return nil }
+            return DNSHostMapping(host: host, target: target)
+        }
     }
 
     // MARK: - Polling
@@ -147,6 +179,12 @@ final class AppState {
         vmType = live.vmType
         vzRosetta = live.vzRosetta
         mountType = live.mountType
+        hostname = live.hostname
+        networkAddress = live.networkAddress
+        sshAgent = live.sshAgent
+        kubernetesEnabled = live.kubernetesEnabled
+        kubernetesVersion = live.kubernetesVersion
+        dnsHostsText = live.dnsHosts.map { "\($0.host)=\($0.target)" }.joined(separator: "\n")
     }
 
     func refreshResources() async {

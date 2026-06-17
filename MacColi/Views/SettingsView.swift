@@ -47,6 +47,26 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            Section("Network") {
+                TextField("Hostname", text: $state.hostname, prompt: Text("colima"))
+                Toggle("Assign reachable IP address", isOn: $state.networkAddress)
+                Toggle("Forward SSH agent", isOn: $state.sshAgent)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Custom DNS hosts")
+                    TextField("host=target, one per line", text: $state.dnsHostsText, axis: .vertical)
+                        .lineLimit(2...5)
+                        .font(.system(.body, design: .monospaced))
+                    Text("Maps DNS names to a custom IP or host, e.g. host.docker.internal=host.lima.internal")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Kubernetes") {
+                Toggle("Enable Kubernetes (k3s)", isOn: $state.kubernetesEnabled)
+                TextField("Version", text: $state.kubernetesVersion, prompt: Text("latest stable"))
+                    .disabled(!state.kubernetesEnabled)
+            }
+
             Section {
                 Text("Changes apply the next time Colima starts. Use Apply to restart now with the new configuration.")
                     .font(.caption).foregroundStyle(.secondary)
