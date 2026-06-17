@@ -1,4 +1,8 @@
-# MacColi
+<p align="center">
+  <img src="MacColi/Assets.xcassets/AppIcon.appiconset/icon_256x256.png" width="128" alt="MacColi app icon">
+</p>
+
+<h1 align="center">MacColi</h1>
 
 A native macOS desktop app for [Colima](https://github.com/abiosoft/colima) — a
 Docker Desktop-style GUI that wraps the `colima` and `docker` CLIs.
@@ -7,9 +11,14 @@ Lives in the menu bar with a full dashboard window:
 
 - **VM lifecycle & settings** — start / stop / restart Colima, live status, and
   configure CPUs, memory, disk, and runtime (docker / containerd).
-- **Containers** — list, start / stop / restart / remove, view logs, open a shell.
+- **Containers** — list, start / stop / restart / remove, open a shell. Click a
+  row to open its logs in a resizable window (its size is remembered) with an
+  opt-in live tail (`docker logs --follow`).
 - **Images** — list, pull, remove.
 - **Volumes** — list, create, remove.
+
+Every resource panel has a filter field — press **⌘F** to focus it and narrow
+the list by name, image, status, and more.
 
 ## Requirements
 
@@ -40,7 +49,8 @@ after each build so `open MacColi.app` runs the latest binary.
   the `@MainActor @Observable` coordinator that owns all UI state.
 - `MacColi/Services` — `ProcessRunner` (async subprocess execution),
   `CLI` (binary resolution + PATH/`DOCKER_HOST` setup), `ColimaService`,
-  `DockerService`, `JSONLines`, `TerminalLauncher`.
+  `DockerService` (which also opens an interactive shell via
+  `open -a Terminal`), and `JSONLines`.
 - `MacColi/Models` — Codable models decoded from `colima list --json` and
   `docker … --format '{{json .}}'`.
 - `MacColi/Views` — dashboard, menu bar, and per-resource panels.
