@@ -249,13 +249,34 @@ final class AppState {
     }
 
     func refreshResources() async {
-        async let c = (try? await docker.containers()) ?? []
-        async let i = (try? await docker.images()) ?? []
-        async let v = (try? await docker.volumes()) ?? []
+        async let c = try? await docker.containers()
+        async let i = try? await docker.images()
+        async let v = try? await docker.volumes()
         let (containers, images, volumes) = await (c, i, v)
-        self.containers = containers
-        self.images = images
-        self.volumes = volumes
+        // Replace a list only on a successful read. A transient docker failure —
+        // e.g. the socket briefly gone while the VM (re)starts, which returns nil —
+        // keeps the last-known list instead of flashing the panel empty. A real
+        // empty (docker returns []) still updates; a stopped VM is cleared by
+        // refresh()'s clearResources() branch, not here.
+        if let containers { self.containers = containers }
+        if let images { self.images = images }
+        if let volumes { self.volumes = volumes }
+    }
+
+    /// Refreshes resources, retrying on a short cadence while docker is still
+    /// coming up after a (re)start. The daemon's socket can lag the VM's
+    /// "running" status by several seconds; without this the panels stay on their
+    /// last-known contents until the next (possibly 30 s background) poll. Stops
+    /// as soon as a container read succeeds, or after the window elapses.
+    private func refreshResourcesUntilReady(maxAttempts: Int = 15) async {
+        for attempt in 0..<maxAttempts {
+            if Task.isCancelled { return }
+            if (try? await docker.containers()) != nil {
+                await refreshResources()
+                return
+            }
+            if attempt < maxAttempts - 1 { try? await Task.sleep(for: .seconds(2)) }
+        }
     }
 
     private func clearResources() {
@@ -276,10 +297,9 @@ final class AppState {
                 + "installed it with Homebrew — run `brew link docker`."
             return
         }
-        perform("Starting Colima… (first run may take a few minutes)") {
+        runToRunning("Starting Colima… (first run may take a few minutes)") {
             self.colimaState = .starting
             try await self.colima.start(self.config)
-            await self.refresh()
         }
     }
 
@@ -291,11 +311,17 @@ final class AppState {
         }
     }
 
+    /// Restarts by an explicit stop → bare start (reusing the saved config) rather
+    /// than `colima restart`. The synchronous stop guarantees the VM is observed
+    /// down, so runToRunning's watcher reliably catches the down→up edge and drops
+    /// the busy overlay the moment the VM is back — instead of missing the brief
+    /// down window `colima restart` exposes and blocking until the command returns.
     func restartColima() {
-        perform("Restarting Colima…") {
+        runToRunning("Restarting Colima…") {
+            self.colimaState = .stopping
+            try await self.colima.stop()
             self.colimaState = .starting
-            try await self.colima.restart()
-            await self.refresh()
+            try await self.colima.start()
         }
     }
 
@@ -310,12 +336,11 @@ final class AppState {
     /// Applies the current CPU/memory/disk/runtime config. `colima restart`
     /// reuses the saved config, so changed resources require stop + start.
     func applyConfig() {
-        perform("Applying configuration…") {
+        runToRunning("Applying configuration…") {
             self.colimaState = .stopping
             try await self.colima.stop()
             self.colimaState = .starting
             try await self.colima.start(self.config)
-            await self.refresh()
         }
     }
 
@@ -456,6 +481,49 @@ final class AppState {
                 + "Settings, then try again."
         }
         return error.localizedDescription
+    }
+
+    /// Runs a lifecycle operation that ends with the VM running (start / restart /
+    /// apply), while a parallel watcher flips the UI to "running" and drops the
+    /// busy overlay as soon as the VM reports up — instead of blocking until the
+    /// command returns, which waits out post-boot provisioning (CA trust store,
+    /// Kubernetes, …) long after the VM is actually usable.
+    ///
+    /// The watcher is edge-triggered: it only fires after first observing a
+    /// not-running state, so restart/apply (where the VM is up at the outset)
+    /// don't latch onto the pre-existing running instance before the stop.
+    private func runToRunning(_ message: String, _ work: @escaping () async throws -> Void) {
+        isBusy = true
+        busyMessage = message
+        errorMessage = nil
+
+        Task {
+            let watcher = Task { @MainActor in
+                var sawDown = false
+                while !Task.isCancelled {
+                    let inst = try? await self.colima.defaultInstance()
+                    if let inst, inst.isRunning {
+                        if sawDown {
+                            self.colimaState = .running(inst)
+                            self.isBusy = false
+                            self.busyMessage = ""
+                            await self.refreshResourcesUntilReady()
+                            return
+                        }
+                    } else {
+                        sawDown = true   // includes nil reads during boot/teardown
+                    }
+                    try? await Task.sleep(for: .seconds(2))
+                }
+            }
+            defer { watcher.cancel() }
+
+            do { try await work() }
+            catch { errorMessage = describe(error) }
+            await refresh()
+            isBusy = false
+            busyMessage = ""
+        }
     }
 
     /// Runs a lifecycle operation with busy/error handling, then refreshes everything.

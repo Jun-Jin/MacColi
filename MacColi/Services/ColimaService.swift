@@ -241,12 +241,17 @@ struct ColimaService {
         try await cli.run("colima", args, environment: cli.colimaEnvironment())
     }
 
-    func stop(profile: String = "default") async throws {
-        try await cli.run("colima", ["stop", profile], environment: cli.colimaEnvironment())
+    /// Starts an existing profile reusing its *saved* configuration — no resource
+    /// flags — so a restart can't silently apply unsaved Settings edits. Still
+    /// reconciles the managed CA-cert provision block first, matching `start(_:)`,
+    /// so corporate root CAs are reinstalled on the restart.
+    func start(profile: String = "default") async throws {
+        try? reconcileCAProvision(profile: profile)
+        try await cli.run("colima", ["start", profile], environment: cli.colimaEnvironment())
     }
 
-    func restart(profile: String = "default") async throws {
-        try await cli.run("colima", ["restart", profile], environment: cli.colimaEnvironment())
+    func stop(profile: String = "default") async throws {
+        try await cli.run("colima", ["stop", profile], environment: cli.colimaEnvironment())
     }
 
     func delete(profile: String = "default") async throws {
