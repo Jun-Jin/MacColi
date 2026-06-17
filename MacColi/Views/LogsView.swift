@@ -7,6 +7,11 @@ struct LogsView: View {
     @Environment(\.dismiss) private var dismiss
     let container: Container
 
+    // Persisted sheet size: the flexible frame opens at the last size and the
+    // user can resize from there (see the size-tracking background below).
+    @AppStorage("logWindow.width") private var width = 680.0
+    @AppStorage("logWindow.height") private var height = 460.0
+
     @State private var text = ""
     @State private var isLoading = true
     @State private var follow = false
@@ -58,7 +63,18 @@ struct LogsView: View {
                 }
             }
         }
-        .frame(width: 680, height: 460)
+        // A min…∞ range (with the stored ideal) makes the sheet user-resizable;
+        // the background tracks the rendered size and persists it for next open.
+        .frame(minWidth: 480, idealWidth: width, maxWidth: .infinity,
+               minHeight: 300, idealHeight: height, maxHeight: .infinity)
+        .background(
+            GeometryReader { geo in
+                Color.clear.onChange(of: geo.size) { _, size in
+                    width = size.width
+                    height = size.height
+                }
+            }
+        )
         // Toggling Follow (or dismissing) cancels this task, which terminates the
         // stream process and stops the flush loop.
         .task(id: follow) { follow ? await startFollowing() : await loadSnapshot() }
