@@ -12,6 +12,8 @@ struct ImagesView: View {
     @State private var selectMode = false
     @State private var selection = Set<String>()
     @State private var confirmRemove = false
+    // Single-row removal awaiting confirmation; non-nil drives the per-image dialog.
+    @State private var pendingRemove: DockerImage?
 
     /// Images matching the filter, by reference, repository or tag.
     private var filtered: [DockerImage] {
@@ -42,14 +44,16 @@ struct ImagesView: View {
                         if selectMode {
                             SelectionCheckmark(isSelected: selection.contains(image.id))
                         }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(image.reference).font(.body.weight(.medium))
-                            Text("\(image.size) · \(image.createdSince)")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
+                        Text(image.reference).font(.body.weight(.medium))
                         Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(image.size)
+                                .font(.callout.weight(.medium)).monospacedDigit()
+                            Text(image.createdSince)
+                                .font(.caption).foregroundStyle(.tertiary)
+                        }
                         if !selectMode {
-                            Button(role: .destructive) { state.removeImage(image) } label: {
+                            Button(role: .destructive) { pendingRemove = image } label: {
                                 Image(systemName: "trash")
                             }
                             .buttonStyle(.borderless)
@@ -98,6 +102,15 @@ struct ImagesView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
+            Text("Images in use will be force-removed. This cannot be undone.")
+        }
+        .confirmationDialog("Remove \(pendingRemove?.reference ?? "image")?",
+                            isPresented: Binding(get: { pendingRemove != nil },
+                                                 set: { if !$0 { pendingRemove = nil } }),
+                            titleVisibility: .visible, presenting: pendingRemove) { image in
+            Button("Remove", role: .destructive) { state.removeImage(image) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
             Text("Images in use will be force-removed. This cannot be undone.")
         }
         .alert("Pull Image", isPresented: $showPull) {

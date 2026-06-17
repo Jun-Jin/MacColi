@@ -139,6 +139,8 @@ private struct ContainerRow: View {
     let isSelected: Bool
     let onToggle: () -> Void
     let showLogs: () -> Void
+    // Drives the per-container removal confirmation from the row's ⋯ menu.
+    @State private var confirmRemove = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -180,6 +182,15 @@ private struct ContainerRow: View {
             }
         }
         .padding(.vertical, 4)
+        .confirmationDialog("Remove \(container.displayName)?",
+                            isPresented: $confirmRemove, titleVisibility: .visible) {
+            Button("Remove", role: .destructive) { state.removeContainer(container) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(container.isRunning
+                 ? "This container is running and will be force-removed. This cannot be undone."
+                 : "This cannot be undone.")
+        }
     }
 
     @ViewBuilder
@@ -199,7 +210,7 @@ private struct ContainerRow: View {
                 Button("Open Shell…") { state.openShell(container) }
             }
             Divider()
-            Button("Remove", role: .destructive) { state.removeContainer(container) }
+            Button("Remove", role: .destructive) { confirmRemove = true }
         } label: {
             Image(systemName: "ellipsis.circle")
         }

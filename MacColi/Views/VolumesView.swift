@@ -12,6 +12,8 @@ struct VolumesView: View {
     @State private var selectMode = false
     @State private var selection = Set<String>()
     @State private var confirmRemove = false
+    // Single-row removal awaiting confirmation; non-nil drives the per-volume dialog.
+    @State private var pendingRemove: Volume?
 
     /// Volumes matching the filter, by name, driver or mountpoint.
     private var filtered: [Volume] {
@@ -56,7 +58,7 @@ struct VolumesView: View {
                                 .font(.caption).foregroundStyle(.tertiary)
                         }
                         if !selectMode {
-                            Button(role: .destructive) { state.removeVolume(volume) } label: {
+                            Button(role: .destructive) { pendingRemove = volume } label: {
                                 Image(systemName: "trash")
                             }
                             .buttonStyle(.borderless)
@@ -105,6 +107,15 @@ struct VolumesView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
+            Text("This cannot be undone.")
+        }
+        .confirmationDialog("Remove \(pendingRemove?.name ?? "volume")?",
+                            isPresented: Binding(get: { pendingRemove != nil },
+                                                 set: { if !$0 { pendingRemove = nil } }),
+                            titleVisibility: .visible, presenting: pendingRemove) { volume in
+            Button("Remove", role: .destructive) { state.removeVolume(volume) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
             Text("This cannot be undone.")
         }
         .alert("Create Volume", isPresented: $showCreate) {
