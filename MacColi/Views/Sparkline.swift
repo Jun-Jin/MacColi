@@ -13,11 +13,15 @@ struct Sparkline: View {
 
     var body: some View {
         GeometryReader { geo in
+            // A single sample draws a flat line spanning the width, so the
+            // sparkline appears with the first data point rather than blank until
+            // a second arrives.
             let pts = points(in: geo.size)
-            if pts.count >= 2 {
+            let drawn = pts.count == 1 ? [pts[0], CGPoint(x: geo.size.width, y: pts[0].y)] : pts
+            if drawn.count >= 2 {
                 ZStack {
-                    path(pts, in: geo.size, closed: true).fill(color.opacity(0.15))
-                    path(pts, in: geo.size, closed: false)
+                    path(drawn, in: geo.size, closed: true).fill(color.opacity(0.15))
+                    path(drawn, in: geo.size, closed: false)
                         .stroke(color, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
                 }
             }

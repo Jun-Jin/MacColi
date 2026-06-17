@@ -28,6 +28,17 @@ final class AppState {
     private(set) var vmCPUHistory: [Double] = []
     private(set) var vmMemHistory: [Double] = []
 
+    // User switch for live monitoring. While off, the stats loop never runs, so
+    // there is zero `docker stats` cost — and the summary/sparklines disappear.
+    // Deliberately starts off every launch (not persisted): monitoring is an
+    // explicit, in-session opt-in, so opening the app never incurs stats cost.
+    var monitoringEnabled = false {
+        didSet {
+            reconcileStatsMonitoring()
+            if !monitoringEnabled { clearStats() }
+        }
+    }
+
     // UI feedback
     private(set) var isBusy: Bool = false
     var busyMessage: String = ""
@@ -200,7 +211,7 @@ final class AppState {
     /// Starts the stats loop when the panel is visible and the window is
     /// frontmost; tears it down otherwise. Idempotent.
     private func reconcileStatsMonitoring() {
-        let shouldRun = statsPanelVisible && statsSceneActive
+        let shouldRun = monitoringEnabled && statsPanelVisible && statsSceneActive
         if shouldRun {
             guard statsTask == nil else { return }
             statsTask = Task { [weak self] in await self?.runStatsLoop() }
@@ -211,17 +222,27 @@ final class AppState {
     }
 
     /// Samples `docker stats` until cancelled. The call itself costs ~1-2 s (the
-    /// daemon's own sampling window, scaling with container count), so the 5 s
-    /// sleep keeps the effective cycle ~7 s and the daemon's duty cycle low
-    /// (~28 %) — slower than the 4 s lifecycle poll on purpose: this is trend
-    /// data you glance at, not action feedback you wait on.
+    /// daemon's own sampling window, scaling with container count).
+    ///
+    /// The loop warms up: the first few samples come back-to-back (no sleep) so a
+    /// freshly-toggled-on monitor fills its bars and sparklines within a couple
+    /// of cycles instead of over ~10 s. It then settles to a 5 s sleep (~7 s
+    /// cycle, ~28 % daemon duty) — slower than the 4 s lifecycle poll on purpose:
+    /// this is trend data you glance at, not action feedback you wait on.
     private func runStatsLoop() async {
+        var sample = 0
         while !Task.isCancelled {
             if colimaState.isRunning, dockerInstalled,
-               let snapshot = try? await docker.containerStats() {
+               let snapshot = try? await docker.containerStats(),
+               // The ~2 s call may have been cancelled mid-flight (e.g. monitoring
+               // toggled off); don't repopulate the just-cleared state.
+               !Task.isCancelled {
                 applyStats(snapshot)
             }
-            try? await Task.sleep(for: .seconds(5))
+            // No pause for the first few samples so the sparkline gets points
+            // fast right after the loop starts; back off to 5 s once warmed up.
+            sample += 1
+            if sample >= 4 { try? await Task.sleep(for: .seconds(5)) }
         }
     }
 
@@ -380,6 +401,10 @@ final class AppState {
         containers = []
         images = []
         volumes = []
+        clearStats()
+    }
+
+    private func clearStats() {
         stats = [:]
         cpuHistory = [:]
         memHistory = [:]

@@ -33,7 +33,7 @@ struct ContainersView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-        if state.colimaState.isRunning { VMResourceSummary() }
+        if state.colimaState.isRunning && state.monitoringEnabled { VMResourceSummary() }
         Group {
             if !state.colimaState.isRunning {
                 RequiresColimaView(noun: "containers")
@@ -87,6 +87,19 @@ struct ContainersView: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
                 .disabled(selectMode)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    state.monitoringEnabled.toggle()
+                } label: {
+                    Label("Monitoring", systemImage: state.monitoringEnabled
+                          ? "gauge.with.dots.needle.bottom.50percent"
+                          : "gauge.with.dots.needle.bottom.0percent")
+                }
+                .help(state.monitoringEnabled
+                      ? "Live monitoring on — turn off to stop sampling"
+                      : "Live monitoring off — turn on to sample CPU & memory")
+                .disabled(!state.colimaState.isRunning)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button(selectMode ? "Done" : "Select") {
