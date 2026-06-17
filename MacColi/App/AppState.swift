@@ -428,6 +428,44 @@ final class AppState {
     func createVolume(_ name: String) { resourceAction("Creating \(name)…") { try await self.docker.createVolume(name) } }
     func removeVolume(_ volume: Volume) { resourceAction("Removing \(volume.name)…") { try await self.docker.removeVolume(volume.name, force: false) } }
 
+    // MARK: - Bulk actions
+
+    func startContainers(_ cs: [Container]) { bulkAction(cs, "Starting \(cs.count) containers…") { try await self.docker.startContainer($0.id) } }
+    func stopContainers(_ cs: [Container]) { bulkAction(cs, "Stopping \(cs.count) containers…") { try await self.docker.stopContainer($0.id) } }
+    func restartContainers(_ cs: [Container]) { bulkAction(cs, "Restarting \(cs.count) containers…") { try await self.docker.restartContainer($0.id) } }
+    func removeContainers(_ cs: [Container]) { bulkAction(cs, "Removing \(cs.count) containers…") { try await self.docker.removeContainer($0.id, force: $0.isRunning) } }
+    func removeImages(_ imgs: [DockerImage]) { bulkAction(imgs, "Removing \(imgs.count) images…") { try await self.docker.removeImage($0.id, force: true) } }
+    func removeVolumes(_ vols: [Volume]) { bulkAction(vols, "Removing \(vols.count) volumes…") { try await self.docker.removeVolume($0.name, force: false) } }
+
+    /// Applies `work` to each selected item under a single busy overlay, then
+    /// refreshes resources once. Individual failures don't abort the run — the
+    /// rest still proceed — and are surfaced together: the first error's message
+    /// plus a count, rather than one banner per failed item.
+    private func bulkAction<Item: Sendable>(_ items: [Item], _ message: String,
+                                            _ work: @escaping (Item) async throws -> Void) {
+        guard !items.isEmpty else { return }
+        Task {
+            isBusy = true
+            busyMessage = message
+            errorMessage = nil
+            defer { isBusy = false; busyMessage = "" }
+            var firstError: Error?
+            var failures = 0
+            for item in items {
+                do { try await work(item) }
+                catch {
+                    failures += 1
+                    if firstError == nil { firstError = error }
+                }
+            }
+            await refreshResources()
+            if let firstError {
+                let suffix = failures > 1 ? " (\(failures) of \(items.count) failed)" : ""
+                errorMessage = describe(firstError) + suffix
+            }
+        }
+    }
+
     // MARK: - Root CA certificates (corporate proxy fix)
 
     /// Imports a root CA certificate so it's installed into the VM on the next
