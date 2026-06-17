@@ -32,18 +32,29 @@ struct ColimaService {
     /// exists yet.
     func currentConfig(profile: String = "default") async -> ColimaConfig? {
         let all = (try? await list()) ?? []
-        guard let instance = all.first(where: { $0.name == profile }) ?? all.first else {
-            return nil
-        }
-        var config = ColimaConfig(profile: instance.name)
-        if let cpus = instance.cpus { config.cpus = cpus }
-        if let memory = instance.memory { config.memoryGiB = Self.gibFromBytes(memory) }
-        if let disk = instance.disk { config.diskGiB = Self.gibFromBytes(disk) }
-        if let arch = instance.arch.flatMap({ VMArch(rawValue: $0) }) { config.arch = arch }
-        if let runtime = instance.runtime.flatMap({ ContainerRuntime(rawValue: $0) }) {
-            config.runtime = runtime
-        }
-        if let yaml = Self.readProfileYAML(profile: instance.name) {
+        let instance = all.first(where: { $0.name == profile }) ?? all.first
+        let name = instance?.name ?? profile
+        let yaml = Self.readProfileYAML(profile: name)
+        // Need at least one source. A stopped/deleted VM has no `colima list`
+        // entry but its `colima.yaml` survives — read from the file so "Reload
+        // from colima.yaml" works regardless of whether the VM is running.
+        guard instance != nil || yaml != nil else { return nil }
+
+        var config = ColimaConfig(profile: name)
+        // Resource fields: prefer the live instance (its actual allocation), but
+        // fall back to the saved YAML (plain GiB integers) when the VM isn't up.
+        if let cpus = instance?.cpus { config.cpus = cpus }
+        else if let v = yaml.flatMap({ Self.yamlScalar("cpu", in: $0) }).flatMap(Int.init) { config.cpus = v }
+        if let memory = instance?.memory { config.memoryGiB = Self.gibFromBytes(memory) }
+        else if let v = yaml.flatMap({ Self.yamlScalar("memory", in: $0) }).flatMap(Int.init) { config.memoryGiB = v }
+        if let disk = instance?.disk { config.diskGiB = Self.gibFromBytes(disk) }
+        else if let v = yaml.flatMap({ Self.yamlScalar("disk", in: $0) }).flatMap(Int.init) { config.diskGiB = v }
+        if let arch = instance?.arch.flatMap({ VMArch(rawValue: $0) }) { config.arch = arch }
+        else if let v = yaml.flatMap({ Self.yamlScalar("arch", in: $0) }).flatMap({ VMArch(rawValue: $0) }) { config.arch = v }
+        if let runtime = instance?.runtime.flatMap({ ContainerRuntime(rawValue: $0) }) { config.runtime = runtime }
+        else if let v = yaml.flatMap({ Self.yamlScalar("runtime", in: $0) }).flatMap({ ContainerRuntime(rawValue: $0) }) { config.runtime = v }
+
+        if let yaml {
             if let v = Self.yamlScalar("vmType", in: yaml).flatMap({ VMType(rawValue: $0) }) {
                 config.vmType = v
             }
@@ -82,25 +93,36 @@ struct ColimaService {
         return Int((bytes + gib / 2) / gib)
     }
 
-    /// Candidate Colima home directories in priority order: `$COLIMA_HOME`, the
-    /// modern XDG default (`$XDG_CONFIG_HOME`/`~/.config` → `colima`), then the
-    /// legacy `~/.colima`.
+    /// Candidate Colima home directories in Colima's own resolution order:
+    /// `$COLIMA_HOME`, then the legacy `~/.colima` (which Colima prefers and uses
+    /// to *ignore* XDG when it exists), then the XDG default
+    /// (`$XDG_CONFIG_HOME`/`~/.config` → `colima`). Matching this order is what
+    /// keeps the app and the CLI reading/writing the same `colima.yaml`.
     private static func candidateHomes() -> [String] {
         let env = ProcessInfo.processInfo.environment
         let home = NSHomeDirectory() as NSString
         var roots: [String] = []
         if let explicit = env["COLIMA_HOME"], !explicit.isEmpty { roots.append(explicit) }
+        roots.append(home.appendingPathComponent(".colima"))
         let configBase = env["XDG_CONFIG_HOME"].flatMap { $0.isEmpty ? nil : $0 }
             ?? home.appendingPathComponent(".config")
         roots.append((configBase as NSString).appendingPathComponent("colima"))
-        roots.append(home.appendingPathComponent(".colima"))
         return roots
     }
 
-    /// The home to write into: an existing one if present, else the default.
+    /// The home Colima itself operates on: `$COLIMA_HOME` if set; else legacy
+    /// `~/.colima` when it exists (Colima ignores XDG in that case); else the XDG
+    /// default. A fresh install with none present resolves to XDG — Colima's
+    /// modern default — never the legacy path.
     private static func colimaHome() -> String {
-        let roots = candidateHomes()
-        return roots.first(where: { FileManager.default.fileExists(atPath: $0) }) ?? roots[0]
+        let env = ProcessInfo.processInfo.environment
+        let home = NSHomeDirectory() as NSString
+        if let explicit = env["COLIMA_HOME"], !explicit.isEmpty { return explicit }
+        let legacy = home.appendingPathComponent(".colima")
+        if FileManager.default.fileExists(atPath: legacy) { return legacy }
+        let configBase = env["XDG_CONFIG_HOME"].flatMap { $0.isEmpty ? nil : $0 }
+            ?? home.appendingPathComponent(".config")
+        return (configBase as NSString).appendingPathComponent("colima")
     }
 
     /// Path to a profile's `colima.yaml` — an existing file if found across the
