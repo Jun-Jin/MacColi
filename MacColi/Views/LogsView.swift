@@ -36,6 +36,7 @@ struct LogsView: View {
                     .help("Reload")
                     .disabled(follow)
                 Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)   // Esc closes the log window
             }
             .padding(12)
             Divider()
