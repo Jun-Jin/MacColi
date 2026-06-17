@@ -70,6 +70,11 @@ final class AppState {
     @ObservationIgnored private let colima = ColimaService()
     @ObservationIgnored private let docker = DockerService()
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+    // Polling cadence (seconds): fast while the dashboard is frontmost, slow when
+    // it isn't. Each poll spawns colima/docker subprocesses that round-trip into
+    // the VM, so backing off when no one is watching avoids needless VM (and
+    // host disk/security-daemon) churn. See setActivePolling.
+    @ObservationIgnored private var pollInterval: TimeInterval = 4
     // Seed Settings from the real VM only once per launch, so polling never
     // clobbers edits the user is making in the Settings panel.
     @ObservationIgnored private var didSyncLiveConfig = false
@@ -123,17 +128,20 @@ final class AppState {
     // MARK: - Polling
 
     /// Begins periodic refresh of status and resources. Safe to call repeatedly.
-    func startPolling(interval: TimeInterval = 4) {
+    /// The loop re-reads `pollInterval` each iteration so the cadence can change
+    /// live (see setActivePolling) without tearing down the task.
+    func startPolling() {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             // Resolve the login-shell PATH once so tools installed by any method
             // (Homebrew, curl, asdf, MacPorts, …) are discoverable.
             await CLI.shared.discoverShellPaths()
             while !Task.isCancelled {
+                guard let self else { return }
                 // Skip while a lifecycle operation is running so the poll never
                 // clobbers a transient state or runs a colima command concurrently.
-                if let self, !self.isBusy { await self.refresh() }
-                try? await Task.sleep(for: .seconds(interval))
+                if !self.isBusy { await self.refresh() }
+                try? await Task.sleep(for: .seconds(self.pollInterval))
             }
         }
     }
@@ -141,6 +149,20 @@ final class AppState {
     func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
+    }
+
+    /// Switches polling between a fast cadence (dashboard frontmost) and a slow
+    /// one (window backgrounded or closed). When the window isn't visible there's
+    /// nothing live to update, so we poll rarely — just often enough to keep the
+    /// menu-bar status roughly current — instead of spawning subprocesses into
+    /// the VM every few seconds. Returning to the foreground refreshes at once.
+    func setActivePolling(_ active: Bool) {
+        let target: TimeInterval = active ? 4 : 30
+        guard target != pollInterval else { return }
+        pollInterval = target
+        // The loop may be mid-sleep; refresh now so the foreground shows current
+        // data immediately rather than waiting out the previous (slow) delay.
+        if active, !isBusy { Task { await refresh() } }
     }
 
     // MARK: - Refresh

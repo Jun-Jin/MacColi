@@ -25,6 +25,7 @@ enum Panel: String, CaseIterable, Identifiable {
 
 struct DashboardView: View {
     @Environment(AppState.self) private var state
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selection: Panel? = .containers
 
     var body: some View {
@@ -59,6 +60,11 @@ struct DashboardView: View {
             guard let panel else { return }
             selection = panel
             state.requestedPanel = nil
+        }
+        // Poll fast only while this window is frontmost; back off otherwise so a
+        // closed/backgrounded app stops round-tripping into the VM every 4s.
+        .onChange(of: scenePhase) { _, phase in
+            state.setActivePolling(phase == .active)
         }
     }
 
