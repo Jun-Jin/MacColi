@@ -1,3 +1,6 @@
+# Local Claude Code tooling (skills, etc.) — kept out of the public repo
+/.claude/
+
 # Build product copied to repo root for `open MacColi.app` (see CLAUDE.md)
 /MacColi.app/
 
