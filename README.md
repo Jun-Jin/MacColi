@@ -54,6 +54,26 @@ warnings.
 
 ## Build from source
 
+### Lightweight (no Xcode) — recommended for contributors
+
+You only need the **Command Line Tools** (~1.5–2 GB), not the full Xcode install:
+
+```sh
+xcode-select --install   # one-time, if not already present
+swift run                # builds and launches the menu-bar app
+```
+
+Use `swift build -c release` to compile without launching. This path builds via
+`Package.swift` and works against the same `MacColi/` sources as the Xcode
+project.
+
+Trade-offs of the lightweight build: it skips the asset catalog (which needs
+Xcode's `actool`), so the dock icon is generic and the accent color falls back to
+the system accent. The binary is unsigned and not bundled as a `.app`. These are
+purely cosmetic/packaging differences — the app behaves identically.
+
+### Full Xcode — for signed/notarized release builds
+
 Open `MacColi.xcodeproj` in Xcode and run, or from the command line:
 
 ```sh
@@ -63,7 +83,8 @@ open MacColi.app
 ```
 
 `MacColi.app` at the repo root is the build product (git-ignored); refresh it
-after each build so `open MacColi.app` runs the latest binary.
+after each build so `open MacColi.app` runs the latest binary. Releases
+(code-signed, notarized, packaged as `.dmg`) always go through this Xcode path.
 
 ## Architecture
 
