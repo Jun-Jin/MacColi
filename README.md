@@ -86,6 +86,23 @@ active docker context.
 The project uses a file-system–synchronized folder group, so new files added
 under `MacColi/` are picked up automatically without editing `project.pbxproj`.
 
+## Polling & live updates
+
+The dashboard refreshes by shelling out to `colima`/`docker` on a timer, and the
+cadence backs off when no one is watching — each poll spawns subprocesses that
+round-trip into the VM, so idling cheaply matters:
+
+- **Status & resources** — every **4 s** while the dashboard window is frontmost,
+  dropping to **30 s** when it is backgrounded or closed (just enough to keep the
+  menu-bar status current). Returning to the foreground refreshes immediately, and
+  polling pauses while a start / stop / restart operation is in flight.
+- **Live CPU/memory monitoring** (opt-in, Containers panel) — samples
+  `docker stats`, which itself takes ~1–2 s. The first few samples run
+  back-to-back to fill the sparklines quickly, then settle to a ~7 s cycle
+  (5 s pause). It runs only while monitoring is on **and** the window is frontmost.
+- **Log tail** — the opt-in live tail streams `docker logs --follow` continuously
+  rather than polling.
+
 ## Releases
 
 Distributed outside the Mac App Store as a Developer ID–signed, notarized app —
