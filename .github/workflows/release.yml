@@ -1,10 +1,11 @@
 name: Release
 
 # Build, codesign (Developer ID), notarize, staple, and package MacColi, then
-# attach the artifacts to a GitHub Release. Mirrors the local
-# `.claude/skills/release/release.sh` pipeline — the same script runs here,
-# unmodified; CI only reconstructs the keychain state it expects (a Developer
-# ID identity + a "MacColiNotary" notary profile) from repository secrets.
+# attach the artifacts to a GitHub Release. The pipeline is self-contained —
+# everything runs inline below; CI only reconstructs the keychain state it
+# needs (a Developer ID identity + a "MacColiNotary" notary profile) from
+# repository secrets. The build is deterministic: the signing identity and
+# Team ID are autodetected from the keychain and the version from Info.plist.
 #
 # Triggers:
 #   - push a tag like `v0.1.0`  → builds and publishes a GitHub Release
@@ -36,7 +37,7 @@ jobs:
           xcodebuild -version
 
       # Recreate the Developer ID signing identity in an ephemeral keychain so
-      # `release.sh`'s `security find-identity` autodetection finds it, exactly
+      # the build's `security find-identity` autodetection finds it, exactly
       # like on the developer's Mac.
       - name: Import Developer ID certificate
         env:
@@ -68,7 +69,7 @@ jobs:
           security find-identity -v -p codesigning
 
       # Store notary credentials under the same "MacColiNotary" profile name the
-      # script passes to `notarytool --keychain-profile`.
+      # build below passes to `notarytool --keychain-profile`.
       - name: Store notarization credentials
         env:
           NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
@@ -81,8 +82,101 @@ jobs:
             --team-id "$NOTARY_TEAM_ID" \
             --password "$NOTARY_APP_PASSWORD"
 
+      # Release build → codesign (Developer ID + hardened runtime + secure
+      # timestamp) → notarize → staple → package (zip + DMG). Distribution is
+      # outside the Mac App Store because the app spawns colima/docker/brew and
+      # reaches the Colima socket, which the App Store sandbox forbids.
       - name: Build · sign · notarize · staple · package
-        run: bash .claude/skills/release/release.sh --dmg
+        env:
+          NOTARY_PROFILE: MacColiNotary
+        run: |
+          set -euo pipefail
+
+          PROJECT="MacColi.xcodeproj"
+          SCHEME="MacColi"
+          DIST="$PWD/dist"
+
+          # Resolve the Developer ID signing identity from the keychain; the
+          # Team ID is the 10-char code in the identity's trailing parentheses.
+          IDENTITY="$(security find-identity -v -p codesigning \
+              | awk -F'"' '/Developer ID Application/ {print $2; exit}')"
+          if [[ -z "$IDENTITY" ]]; then
+              echo "No 'Developer ID Application' identity in keychain" >&2
+              security find-identity -v -p codesigning >&2 || true
+              exit 1
+          fi
+          TEAM_ID="$(sed -E 's/.*\(([A-Z0-9]+)\)$/\1/' <<<"$IDENTITY")"
+          echo "Signing identity: $IDENTITY"
+          echo "Team ID:          $TEAM_ID"
+
+          # Build (Release, unsigned — we sign explicitly below).
+          echo "Building $SCHEME (Release)…"
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+              build CODE_SIGNING_ALLOWED=NO
+
+          # Resolve the product path from build settings so we don't hardcode
+          # the machine-specific DerivedData hash.
+          SETTINGS="$(xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
+              -configuration Release -showBuildSettings 2>/dev/null)"
+          TBD="$(sed -n 's/^[[:space:]]*TARGET_BUILD_DIR = //p'  <<<"$SETTINGS" | head -1)"
+          FPN="$(sed -n 's/^[[:space:]]*FULL_PRODUCT_NAME = //p' <<<"$SETTINGS" | head -1)"
+          SRC_APP="$TBD/$FPN"
+          if [[ -z "$TBD" || -z "$FPN" || ! -d "$SRC_APP" ]]; then
+              echo "Build product not found at: ${SRC_APP:-<unresolved>}" >&2
+              exit 1
+          fi
+
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+                      "$SRC_APP/Contents/Info.plist")"
+          echo "Version:          $VERSION"
+
+          # Stage a fresh copy so signing never mutates the DerivedData product.
+          rm -rf "$DIST"; mkdir -p "$DIST"
+          APP="$DIST/MacColi.app"
+          cp -R "$SRC_APP" "$APP"
+
+          # Codesign nested Mach-O first (deepest-first), then the outer app, so
+          # the seal stays valid even if the bundle ever gains frameworks.
+          SIGN_FLAGS=(--force --options runtime --timestamp --sign "$IDENTITY")
+          while IFS= read -r -d '' nested; do
+              echo "Signing nested: ${nested#"$APP"/}"
+              codesign "${SIGN_FLAGS[@]}" "$nested"
+          done < <(find "$APP/Contents" \
+                      \( -name "*.framework" -o -name "*.dylib" -o -name "*.appex" \) \
+                      -print0 2>/dev/null | sort -rz)
+
+          echo "Signing app bundle…"
+          codesign "${SIGN_FLAGS[@]}" "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+          # Notarize the app, then staple the ticket onto it.
+          ZIP="$DIST/MacColi-$VERSION.zip"
+          ditto -c -k --keepParent "$APP" "$ZIP"
+          echo "Submitting to notary service (profile: $NOTARY_PROFILE)…"
+          xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+          xcrun stapler staple "$APP"
+
+          # Re-zip the *stapled* app as the distributable (the earlier zip
+          # predates the ticket; stapling applies to the .app, not the zip).
+          rm -f "$ZIP"
+          ditto -c -k --keepParent "$APP" "$ZIP"
+          echo "→ $ZIP"
+
+          # Notarized + stapled DMG.
+          DMG="$DIST/MacColi-$VERSION.dmg"
+          STAGE="$(mktemp -d)"
+          cp -R "$APP" "$STAGE/MacColi.app"
+          ln -s /Applications "$STAGE/Applications"
+          echo "Building DMG…"
+          hdiutil create -volname "MacColi" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+          rm -rf "$STAGE"
+          xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+          xcrun stapler staple "$DMG"
+          echo "→ $DMG"
+
+          # Final verification — what Gatekeeper sees on a clean Mac.
+          spctl -a -vvv -t exec "$APP" || true
+          xcrun stapler validate "$APP" || true
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v5
