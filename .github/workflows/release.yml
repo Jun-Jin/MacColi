@@ -194,3 +194,42 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.dmg \
             --title "MacColi $GITHUB_REF_NAME" --generate-notes
+
+      # Update the Homebrew cask in Jun-Jin/homebrew-tap to point at this
+      # release. We hash the DMG we just built (authoritative — it's the exact
+      # asset uploaded above) and rewrite the cask's version + sha256, then
+      # commit straight to the tap's main. A release published by the default
+      # GITHUB_TOKEN can't trigger another workflow, so this runs in-line here
+      # rather than as a separate `on: release` workflow. HOMEBREW_TAP_TOKEN is
+      # a PAT with Contents:write on the tap repo.
+      - name: Bump Homebrew cask
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          DMG="dist/MacColi-$VERSION.dmg"
+          if [[ ! -f "$DMG" ]]; then
+              echo "Expected $DMG (from tag $GITHUB_REF_NAME) but it is missing" >&2
+              exit 1
+          fi
+          SHA="$(shasum -a 256 "$DMG" | awk '{print $1}')"
+          echo "Bumping cask → version $VERSION, sha256 $SHA"
+
+          WORK="$(mktemp -d)"
+          git clone --depth 1 \
+              "https://x-access-token:${TAP_TOKEN}@github.com/Jun-Jin/homebrew-tap.git" "$WORK"
+          CASK="$WORK/Casks/maccoli.rb"
+          sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/" "$CASK"
+          sed -i '' -E "s/^  sha256 \".*\"/  sha256 \"$SHA\"/"      "$CASK"
+
+          git -C "$WORK" config user.name  "github-actions[bot]"
+          git -C "$WORK" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git -C "$WORK" diff --quiet; then
+              echo "Cask already at $VERSION — nothing to do."
+              exit 0
+          fi
+          git -C "$WORK" commit -aqm "maccoli $VERSION"
+          git -C "$WORK" push origin HEAD:main
+          echo "✅ Cask bumped to $VERSION."
