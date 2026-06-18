@@ -10,15 +10,18 @@ Docker Desktop-style GUI that wraps the `colima` and `docker` CLIs.
 Lives in the menu bar with a full dashboard window:
 
 - **VM lifecycle & settings** — start / stop / restart Colima, live status, and
-  configure CPUs, memory, disk, and runtime (docker / containerd).
-- **Containers** — list, start / stop / restart / remove, open a shell. Click a
-  row to open its logs in a resizable window (its size is remembered) with an
-  opt-in live tail (`docker logs --follow`).
+  configure CPUs, memory, disk, and runtime (docker / containerd / incus).
+- **Containers** — list, run from an image, start / stop / restart / remove, open
+  a shell, and opt-in live CPU/memory monitoring. Click a row to open its logs in
+  a resizable window (its size is remembered) with an opt-in live tail
+  (`docker logs --follow`).
 - **Images** — list, pull, remove.
-- **Volumes** — list, create, remove.
+- **Volumes** — list, create, remove, with per-volume disk usage.
+- **Networks** — list, create, remove.
 
-Every resource panel has a filter field — press **⌘F** to focus it and narrow
-the list by name, image, status, and more.
+Resource panels support multi-select bulk actions and a **Clean Up** system
+prune. Every panel has a filter field — press **⌘F** to focus it and narrow the
+list by name, image, status, and more.
 
 ## Requirements
 
@@ -29,7 +32,27 @@ the list by name, image, status, and more.
   ```
   (The app also offers an "Install Colima…" button that runs this for you.)
 
-## Build & run
+## Installation
+
+### Homebrew (recommended)
+
+```sh
+brew tap Jun-Jin/tap
+brew install --cask maccoli
+```
+
+Upgrade later with `brew upgrade --cask maccoli`.
+
+### Direct download
+
+Download the latest notarized `MacColi.dmg` from the
+[releases page](https://github.com/Jun-Jin/MacColi/releases/latest), open it, and
+drag **MacColi.app** into Applications.
+
+The app is Developer ID–signed and notarized, so Gatekeeper opens it without
+warnings.
+
+## Build from source
 
 Open `MacColi.xcodeproj` in Xcode and run, or from the command line:
 
@@ -63,7 +86,14 @@ active docker context.
 The project uses a file-system–synchronized folder group, so new files added
 under `MacColi/` are picked up automatically without editing `project.pbxproj`.
 
-## Status
+## Releases
 
-v1 scaffold. Manages the `default` Colima profile. Not sandboxed (it runs
-subprocesses); ad-hoc signed for local development.
+Distributed outside the Mac App Store as a Developer ID–signed, notarized app —
+it spawns `colima`/`docker` and reaches the Colima socket, which the App Store
+sandbox forbids. Each tagged release builds, notarizes, and publishes
+automatically, and updates the Homebrew cask.
+
+See [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) for the changelog.
+
+It manages the `default` Colima profile and is not sandboxed (it runs
+subprocesses).
