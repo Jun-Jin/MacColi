@@ -195,7 +195,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.dmg \
             --title "MacColi $GITHUB_REF_NAME" --generate-notes
 
-      # Update the Homebrew cask in Jun-Jin/homebrew-tap to point at this
+      # Update the Homebrew cask in Jun-Jin/homebrew-maccoli to point at this
       # release. We hash the DMG we just built (authoritative — it's the exact
       # asset uploaded above) and rewrite the cask's version + sha256, then
       # commit straight to the tap's main. A release published by the default
@@ -219,7 +219,7 @@ jobs:
 
           WORK="$(mktemp -d)"
           git clone --depth 1 \
-              "https://x-access-token:${TAP_TOKEN}@github.com/Jun-Jin/homebrew-tap.git" "$WORK"
+              "https://x-access-token:${TAP_TOKEN}@github.com/Jun-Jin/homebrew-maccoli.git" "$WORK"
           CASK="$WORK/Casks/maccoli.rb"
           sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/" "$CASK"
           sed -i '' -E "s/^  sha256 \".*\"/  sha256 \"$SHA\"/"      "$CASK"

@@ -37,7 +37,7 @@ list by name, image, status, and more.
 ### Homebrew (recommended)
 
 ```sh
-brew tap Jun-Jin/tap
+brew tap Jun-Jin/maccoli
 brew install --cask maccoli
 ```
 
