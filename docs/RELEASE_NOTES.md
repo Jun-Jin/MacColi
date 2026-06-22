@@ -4,6 +4,13 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.4.5
+
+- 🧹 Removed the legacy "Colimac" CA-certificate migration. Managed root CA
+  provisioning now reads only the `maccoli-certs/` directory and `maccoli`
+  YAML markers; certificates added under the old pre-rebrand build are no
+  longer carried over and would need to be re-imported in Settings.
+
 ## v0.4.4
 
 - 🐛 Fixed the Run Image sheet layout breaking when the selected image
