@@ -65,8 +65,12 @@ struct RunContainerSheet: View {
                                 Divider()
                                 Button("Custom…") { image = ""; isCustom = true }
                             }
-                            // Hug the label so the field gets the rest of the row.
-                            .fixedSize()
+                            .lineLimit(1)
+                            // In custom mode hug the short "Custom…" label so the
+                            // text field gets the rest of the row. Otherwise let the
+                            // menu fill the row and truncate — a long image
+                            // reference must not push the sheet wider than its frame.
+                            .fixedSize(horizontal: isCustom, vertical: false)
                             if isCustom {
                                 TextField("", text: $image)
                                     .textFieldStyle(.roundedBorder)
