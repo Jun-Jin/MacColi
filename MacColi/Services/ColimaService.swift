@@ -263,31 +263,10 @@ struct ColimaService {
     private static let caBeginMarker = "# maccoli:ca-certs:begin (managed by MacColi — do not edit)"
     private static let caEndMarker = "# maccoli:ca-certs:end"
 
-    // Sentinels written by pre-rebrand "Colimac" builds. Recognized so an old
-    // managed region is migrated — excluded from provisioning checks and replaced
-    // on the next reconcile — rather than mistaken for user-authored content.
-    private static let legacyCABeginMarker = "colimac:ca-certs:begin"
-    private static let legacyCAEndMarker = "colimac:ca-certs:end"
-
     /// Directory holding MacColi-managed root CA certificates. Kept separate from
     /// any `certs/` directory the user manages by hand so the two never collide.
     private static func managedCertsDir() -> String {
         (colimaHome() as NSString).appendingPathComponent("maccoli-certs")
-    }
-
-    /// Directory used by pre-rebrand "Colimac" builds, migrated to `maccoli-certs`
-    /// on first reconcile so certs added under the old name aren't orphaned.
-    private static func legacyManagedCertsDir() -> String {
-        (colimaHome() as NSString).appendingPathComponent("colimac-certs")
-    }
-
-    /// One-time move of the legacy `colimac-certs/` directory to `maccoli-certs/`.
-    /// No-op once migrated, or if the legacy directory never existed.
-    private static func migrateLegacyManagedCertsDirIfNeeded() {
-        let fm = FileManager.default
-        let legacy = legacyManagedCertsDir(), current = managedCertsDir()
-        guard fm.fileExists(atPath: legacy), !fm.fileExists(atPath: current) else { return }
-        try? fm.moveItem(atPath: legacy, toPath: current)
     }
 
     /// Filenames of the currently managed root CA certificates.
@@ -327,8 +306,8 @@ struct ColimaService {
               let block = Self.topLevelBlock("provision", in: yaml) else { return false }
         var inManagedRegion = false
         for line in block {
-            if line.contains("maccoli:ca-certs:begin") || line.contains(Self.legacyCABeginMarker) { inManagedRegion = true; continue }
-            if line.contains("maccoli:ca-certs:end") || line.contains(Self.legacyCAEndMarker) { inManagedRegion = false; continue }
+            if line.contains("maccoli:ca-certs:begin") { inManagedRegion = true; continue }
+            if line.contains("maccoli:ca-certs:end") { inManagedRegion = false; continue }
             guard !inManagedRegion else { continue }
             if line.drop(while: { $0 == " " }).hasPrefix("-") { return true }
         }
@@ -338,7 +317,6 @@ struct ColimaService {
     /// Writes/updates/removes the MacColi-managed provision block in the profile
     /// YAML to match the current managed certs. No-op if already in sync.
     func reconcileCAProvision(profile: String = "default") throws {
-        Self.migrateLegacyManagedCertsDirIfNeeded()
         let certs = managedCACertificates()
         let path = Self.profileYAMLPath(profile)
         let existing = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
@@ -357,14 +335,11 @@ struct ColimaService {
         // Drop a single trailing empty element from a final newline so we control it.
         if lines.last == "" { lines.removeLast() }
 
-        // 1. Remove any existing managed region (by sentinel markers) — current or
-        //    legacy (pre-rebrand "Colimac"), so an upgraded profile is migrated.
-        for (beginMark, endMark) in [("maccoli:ca-certs:begin", "maccoli:ca-certs:end"),
-                                     (legacyCABeginMarker, legacyCAEndMarker)] {
-            if let begin = lines.firstIndex(where: { $0.contains(beginMark) }),
-               let end = lines.firstIndex(where: { $0.contains(endMark) }), end >= begin {
-                lines.removeSubrange(begin...end)
-            }
+        // 1. Remove any existing managed region (by sentinel markers) so we can
+        //    rewrite it from the current managed certs.
+        if let begin = lines.firstIndex(where: { $0.contains("maccoli:ca-certs:begin") }),
+           let end = lines.firstIndex(where: { $0.contains("maccoli:ca-certs:end") }), end >= begin {
+            lines.removeSubrange(begin...end)
         }
 
         let region = certs.isEmpty ? [] : managedRegionLines(certs: certs, certsDir: certsDir)
