@@ -4,6 +4,11 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.4.4
+
+- 🐛 Fixed the Run Image sheet layout breaking when the selected image
+  reference was long — the picker now truncates instead of overflowing.
+
 ## v0.4.3
 
 - 🍶 New makgeolli PET-bottle app icon.
