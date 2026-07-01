@@ -58,7 +58,8 @@ set at a time. Alongside them sits **All Containers**, the full unfiltered list.
 ### Homebrew (recommended)
 
 ```sh
-brew tap Jun-Jin/maccoli
+brew tap jun-jin/maccoli
+brew trust jun-jin/maccoli
 brew install --cask maccoli
 ```
 
