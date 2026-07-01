@@ -279,6 +279,10 @@ private struct ContainerRow: View {
             }
         }
         .padding(.vertical, 4)
+        // Right-click anywhere on the row for the same actions as the ⋯ button.
+        // Suppressed in Select mode, where a click means "toggle selection" and a
+        // single-row action menu would conflict with the multi-select workflow.
+        .contextMenuIf(!selectMode) { rowMenu }
         .confirmationDialog(listName == nil ? "Remove \(container.displayName)?"
                                             : "Delete \(container.displayName)?",
                             isPresented: $confirmRemove, titleVisibility: .visible) {
@@ -313,24 +317,41 @@ private struct ContainerRow: View {
                 .help("Start")
         }
 
-        Menu {
-            Button("Restart") { state.restartContainer(container) }
-            Button("View Logs…", action: showLogs)
-            if container.isRunning {
-                Button("Open Shell…") { state.openShell(container) }
-            }
-            Divider()
-            if let listName {
-                Button("Remove from \(listName)", action: onRemoveFromList)
-                Button("Delete Container…", role: .destructive) { confirmRemove = true }
-            } else {
-                Button("Remove", role: .destructive) { confirmRemove = true }
-            }
-        } label: {
+        Menu { rowMenu } label: {
             Image(systemName: "ellipsis.circle")
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+    }
+
+    /// The per-container action menu, shared by the trailing ⋯ button and the
+    /// row's right-click context menu so both stay in lockstep. Remove is
+    /// list-aware: in a list it offers detach ("Remove from …") plus a
+    /// destructive delete; in All Containers it's a plain Remove.
+    @ViewBuilder
+    private var rowMenu: some View {
+        Button("Restart") { state.restartContainer(container) }
+        Button("View Logs…", action: showLogs)
+        if container.isRunning {
+            Button("Open Shell…") { state.openShell(container) }
+        }
+        Divider()
+        if let listName {
+            Button("Remove from \(listName)", action: onRemoveFromList)
+            Button("Delete Container…", role: .destructive) { confirmRemove = true }
+        } else {
+            Button("Remove", role: .destructive) { confirmRemove = true }
+        }
+    }
+}
+
+private extension View {
+    /// Attaches a context menu only when `enabled`; otherwise returns the view
+    /// untouched (an always-present but empty context menu would still swallow the
+    /// right-click).
+    @ViewBuilder
+    func contextMenuIf<M: View>(_ enabled: Bool, @ViewBuilder menu: () -> M) -> some View {
+        if enabled { contextMenu(menuItems: menu) } else { self }
     }
 }
 
