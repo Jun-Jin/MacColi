@@ -4,6 +4,19 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.5.0 — Custom container lists
+
+- 🗂️ **Custom container lists** under the Containers sidebar item — create,
+  rename, edit, and delete named groups of containers. Build one from the ＋
+  button or from a multi-selection (**Add to List**). Each list reuses the full
+  panel (All / Running / Stopped filter, ⌘F search, Select mode, bulk actions);
+  membership is remembered by container name and persists across launches.
+- 🧹 Inside a list, **Remove** offers *remove from this list* (detach) vs *delete
+  container* (`docker rm`) — and deleting a container anywhere drops it from every
+  list.
+- 🖱️ Right-click a container row for its actions (Restart, View Logs, Open Shell,
+  Remove) — the same menu as the ⋯ button.
+
 ## v0.4.5
 
 - 🧹 Removed the legacy "Colimac" CA-certificate migration. Managed root CA

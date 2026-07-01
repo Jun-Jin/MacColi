@@ -14,7 +14,8 @@ Lives in the menu bar with a full dashboard window:
 - **Containers** — list, run from an image, start / stop / restart / remove, open
   a shell, and opt-in live CPU/memory monitoring. Click a row to open its logs in
   a resizable window (its size is remembered) with an opt-in live tail
-  (`docker logs --follow`).
+  (`docker logs --follow`). Right-click any row for its actions, and group
+  containers into [custom lists](#custom-container-lists).
 - **Images** — list, pull, remove.
 - **Volumes** — list, create, remove, with per-volume disk usage.
 - **Networks** — list, create, remove.
@@ -22,6 +23,26 @@ Lives in the menu bar with a full dashboard window:
 Resource panels support multi-select bulk actions and a **Clean Up** system
 prune. Every panel has a filter field — press **⌘F** to focus it and narrow the
 list by name, image, status, and more.
+
+## Custom container lists
+
+Group containers into named lists nested under the **Containers** item in the
+sidebar — handy when you run many containers and want to work on one project's
+set at a time. Alongside them sits **All Containers**, the full unfiltered list.
+
+- **Create** a list from the ＋ button next to *Containers*, or select containers
+  in **All Containers** (Select mode) and choose **Add to List → New List…**.
+- **Rename**, **Edit** (change membership), and **Delete** a list from its
+  right-click menu in the sidebar. Deleting a list never touches the containers.
+- Each list reuses the whole panel — the All / Running / Stopped filter, ⌘F
+  search, Select mode, and bulk Start / Stop / Restart.
+- Membership is remembered by container **name**, so a list survives stop/start
+  and recreation. Lists are stored locally (in `UserDefaults`) and are pure UI
+  metadata — Docker itself has no notion of them.
+- Inside a list, **Remove** asks whether to *remove from this list* (detach only,
+  leaving the container running) or *delete the container* (`docker rm`, which
+  drops it from every list). Deleting a container anywhere removes it from all
+  lists.
 
 ## Requirements
 
