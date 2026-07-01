@@ -19,6 +19,13 @@ final class AppState {
     private(set) var volumes: [Volume] = []
     private(set) var networks: [DockerNetwork] = []
 
+    // User-defined container groupings shown under the Containers sidebar item.
+    // Local metadata only (Docker has no equivalent); persisted as JSON in
+    // UserDefaults and mutated exclusively through the CRUD helpers below, each of
+    // which re-persists. Kept private(set) so views can't mutate the array without
+    // going through a persisting path.
+    private(set) var containerLists: [ContainerList] = []
+
     // Live stats (running containers only), keyed by short container id, plus
     // rolling per-container and VM-wide history for sparklines. Populated by a
     // dedicated, slower loop that runs only while live monitoring is enabled —
@@ -128,6 +135,7 @@ final class AppState {
         kubernetesVersion = d.string(forKey: "config.kubernetesVersion") ?? ""
         dnsHostsText = d.string(forKey: "config.dnsHosts") ?? ""
         caCertificates = colima.managedCACertificates()
+        containerLists = Self.loadContainerLists(from: d)
     }
 
     var config: ColimaConfig {
@@ -537,7 +545,12 @@ final class AppState {
     func startContainer(_ c: Container) { resourceAction("Starting \(c.displayName)…") { try await self.docker.startContainer(c.id) } }
     func stopContainer(_ c: Container) { resourceAction("Stopping \(c.displayName)…") { try await self.docker.stopContainer(c.id) } }
     func restartContainer(_ c: Container) { resourceAction("Restarting \(c.displayName)…") { try await self.docker.restartContainer(c.id) } }
-    func removeContainer(_ c: Container) { resourceAction("Removing \(c.displayName)…") { try await self.docker.removeContainer(c.id, force: c.isRunning) } }
+    func removeContainer(_ c: Container) {
+        resourceAction("Removing \(c.displayName)…",
+                       onSuccess: { self.stripFromAllLists([c.membershipKey]) }) {
+            try await self.docker.removeContainer(c.id, force: c.isRunning)
+        }
+    }
     func openShell(_ c: Container) {
         if !docker.openShell(in: c) {
             errorMessage = "Couldn't open a shell for \(c.displayName). Is the container running?"
@@ -615,7 +628,17 @@ final class AppState {
     func startContainers(_ cs: [Container]) { bulkAction(cs, "Starting \(cs.count) containers…") { try await self.docker.startContainer($0.id) } }
     func stopContainers(_ cs: [Container]) { bulkAction(cs, "Stopping \(cs.count) containers…") { try await self.docker.stopContainer($0.id) } }
     func restartContainers(_ cs: [Container]) { bulkAction(cs, "Restarting \(cs.count) containers…") { try await self.docker.restartContainer($0.id) } }
-    func removeContainers(_ cs: [Container]) { bulkAction(cs, "Removing \(cs.count) containers…") { try await self.docker.removeContainer($0.id, force: $0.isRunning) } }
+    func removeContainers(_ cs: [Container]) {
+        let keys = cs.map(\.membershipKey)
+        bulkAction(cs, "Removing \(cs.count) containers…",
+                   onSuccess: {
+                       // Detach only containers that are actually gone after the
+                       // refresh, so a partial failure never orphans a still-live
+                       // container out of its lists.
+                       let live = Set(self.containers.map(\.membershipKey))
+                       self.stripFromAllLists(keys.filter { !live.contains($0) })
+                   }) { try await self.docker.removeContainer($0.id, force: $0.isRunning) }
+    }
     func removeImages(_ imgs: [DockerImage]) { bulkAction(imgs, "Removing \(imgs.count) images…") { try await self.docker.removeImage($0.id, force: true) } }
     func removeVolumes(_ vols: [Volume]) { bulkAction(vols, "Removing \(vols.count) volumes…") { try await self.docker.removeVolume($0.name, force: false) } }
     func removeNetworks(_ nets: [DockerNetwork]) { bulkAction(nets, "Removing \(nets.count) networks…") { try await self.docker.removeNetwork($0.id) } }
@@ -625,6 +648,7 @@ final class AppState {
     /// rest still proceed — and are surfaced together: the first error's message
     /// plus a count, rather than one banner per failed item.
     private func bulkAction<Item: Sendable>(_ items: [Item], _ message: String,
+                                            onSuccess: (() -> Void)? = nil,
                                             _ work: @escaping (Item) async throws -> Void) {
         guard !items.isEmpty else { return }
         Task {
@@ -643,11 +667,102 @@ final class AppState {
                 }
             }
             await refreshResources()
+            // Runs after the refresh so hooks can inspect the post-op state (e.g.
+            // list cleanup keying off which containers are actually gone). Safe to
+            // call on partial/total failure — such hooks self-filter.
+            onSuccess?()
             if let firstError {
                 let suffix = failures > 1 ? " (\(failures) of \(items.count) failed)" : ""
                 errorMessage = describe(firstError) + suffix
             }
         }
+    }
+
+    // MARK: - Container lists
+
+    /// UserDefaults key for the JSON-encoded custom lists.
+    @ObservationIgnored private static let containerListsKey = "containerLists"
+
+    private static func loadContainerLists(from d: UserDefaults) -> [ContainerList] {
+        guard let data = d.data(forKey: containerListsKey),
+              let lists = try? JSONDecoder().decode([ContainerList].self, from: data)
+        else { return [] }
+        return lists
+    }
+
+    /// Encodes the current lists to UserDefaults. Called at the end of every
+    /// mutator — not via a `didSet` — so edits to a nested member array (which a
+    /// property observer on the outer array still catches, but explicit calls make
+    /// the persistence contract obvious) are always written through.
+    private func persistContainerLists() {
+        guard let data = try? JSONEncoder().encode(containerLists) else { return }
+        defaults.set(data, forKey: Self.containerListsKey)
+    }
+
+    /// The containers currently belonging to `list`, resolved by name against the
+    /// live list and kept in `containers` order (a member whose container no
+    /// longer exists simply doesn't appear).
+    func containers(in list: ContainerList) -> [Container] {
+        let members = Set(list.members)
+        return containers.filter { members.contains($0.membershipKey) }
+    }
+
+    /// Creates a list and returns its id so the caller can select it.
+    @discardableResult
+    func createList(name: String, members: [String] = []) -> ContainerList.ID {
+        let list = ContainerList(name: name.trimmingCharacters(in: .whitespaces),
+                                 members: members)
+        containerLists.append(list)
+        persistContainerLists()
+        return list.id
+    }
+
+    func renameList(_ id: ContainerList.ID, to name: String) {
+        guard let i = containerLists.firstIndex(where: { $0.id == id }) else { return }
+        containerLists[i].name = name.trimmingCharacters(in: .whitespaces)
+        persistContainerLists()
+    }
+
+    func deleteList(_ id: ContainerList.ID) {
+        containerLists.removeAll { $0.id == id }
+        persistContainerLists()
+    }
+
+    /// Replaces a list's membership wholesale — the "Edit" operation.
+    func setMembers(_ id: ContainerList.ID, to members: [String]) {
+        guard let i = containerLists.firstIndex(where: { $0.id == id }) else { return }
+        containerLists[i].members = members
+        persistContainerLists()
+    }
+
+    /// Adds containers to a list, ignoring ones already present (order preserved).
+    func addToList(_ id: ContainerList.ID, containers cs: [Container]) {
+        guard let i = containerLists.firstIndex(where: { $0.id == id }) else { return }
+        let existing = Set(containerLists[i].members)
+        for key in cs.map(\.membershipKey) where !existing.contains(key) {
+            containerLists[i].members.append(key)
+        }
+        persistContainerLists()
+    }
+
+    /// Detaches containers from a single list — the "Remove from this list" action.
+    func removeFromList(_ id: ContainerList.ID, keys: [String]) {
+        guard let i = containerLists.firstIndex(where: { $0.id == id }) else { return }
+        let drop = Set(keys)
+        containerLists[i].members.removeAll { drop.contains($0) }
+        persistContainerLists()
+    }
+
+    /// Strips membership keys from every list — used after a container is deleted
+    /// from Docker so it disappears from all lists (the "delete = gone everywhere"
+    /// semantics).
+    private func stripFromAllLists(_ keys: [String]) {
+        guard !keys.isEmpty else { return }
+        let drop = Set(keys)
+        for i in containerLists.indices {
+            containerLists[i].members.removeAll { drop.contains($0) }
+        }
+        persistContainerLists()
     }
 
     // MARK: - Root CA certificates (corporate proxy fix)
@@ -766,7 +881,10 @@ final class AppState {
     }
 
     /// Runs a resource (docker) operation, then refreshes resources only.
-    private func resourceAction(_ message: String, _ work: @escaping () async throws -> Void) {
+    /// `onSuccess` fires after the refresh only when the work succeeded — used to
+    /// keep dependent local state (e.g. list membership) in sync with the change.
+    private func resourceAction(_ message: String, onSuccess: (() -> Void)? = nil,
+                                _ work: @escaping () async throws -> Void) {
         Task {
             isBusy = true
             busyMessage = message
@@ -776,6 +894,7 @@ final class AppState {
             do {
                 try await work()
                 await refreshResources()
+                onSuccess?()
             } catch {
                 errorMessage = describe(error)
             }

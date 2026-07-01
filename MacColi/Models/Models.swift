@@ -154,6 +154,29 @@ struct Container: Codable, Identifiable, Hashable {
 
     var isRunning: Bool { state.lowercased() == "running" }
     var displayName: String { names.split(separator: ",").first.map(String.init) ?? names }
+
+    /// Stable key used for custom-list membership. Container ids change when a
+    /// container is recreated (`docker rm` + `run`), whereas the name is stable
+    /// across stop/start and reused on recreation — so lists remember containers
+    /// by name, not id.
+    var membershipKey: String { displayName }
+}
+
+/// A user-defined, named grouping of containers shown under the Containers
+/// sidebar item. Membership is stored by container name (`membershipKey`) and is
+/// pure client-side metadata — Docker has no notion of these lists; they're
+/// persisted locally (see AppState.containerLists) and resolved against the live
+/// container list for display.
+struct ContainerList: Identifiable, Codable, Hashable {
+    var id: UUID
+    var name: String
+    var members: [String]      // container membershipKey values
+
+    init(id: UUID = UUID(), name: String, members: [String] = []) {
+        self.id = id
+        self.name = name
+        self.members = members
+    }
 }
 
 struct DockerImage: Codable, Identifiable, Equatable {

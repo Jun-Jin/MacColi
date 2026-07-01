@@ -1,6 +1,10 @@
 import SwiftUI
 
 struct ContainersView: View {
+    /// The list this panel shows, or nil for "All Containers". A list restricts
+    /// the source set to its members and switches Remove to list-aware semantics.
+    var list: ContainerList?
+
     @Environment(AppState.self) private var state
     @Environment(\.openWindow) private var openWindow
     @State private var search = ""
@@ -12,12 +16,22 @@ struct ContainersView: View {
     @State private var selectMode = false
     @State private var selection = Set<String>()
     @State private var confirmRemove = false
+    // Presents the new-list sheet prefilled with the current selection, for the
+    // "Add to List → New List…" bulk action.
+    @State private var creatingListFromSelection = false
+
+    /// The containers this panel draws from before filtering: every container, or
+    /// just the members of the current list.
+    private var base: [Container] {
+        if let list { return state.containers(in: list) }
+        return state.containers
+    }
 
     /// Containers matching the status filter and, if any, the text query (by
     /// name, image, status or ports).
     private var filtered: [Container] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        return state.containers.filter { c in
+        return base.filter { c in
             guard statusFilter.matches(c) else { return false }
             guard !q.isEmpty else { return true }
             return c.displayName.lowercased().contains(q)
@@ -35,9 +49,14 @@ struct ContainersView: View {
         Group {
             if !state.colimaState.isRunning {
                 RequiresColimaView(noun: "containers")
-            } else if state.containers.isEmpty {
-                ContentUnavailableView("No containers", systemImage: "shippingbox",
-                                       description: Text("Run a container to see it here."))
+            } else if base.isEmpty {
+                if list != nil {
+                    ContentUnavailableView("No containers in this list", systemImage: "shippingbox",
+                                           description: Text("Add containers from All Containers, or Edit the list."))
+                } else {
+                    ContentUnavailableView("No containers", systemImage: "shippingbox",
+                                           description: Text("Run a container to see it here."))
+                }
             } else if filtered.isEmpty {
                 if search.isEmpty {
                     ContentUnavailableView("No \(statusFilter.label.lowercased()) containers",
@@ -53,26 +72,21 @@ struct ContainersView: View {
                         selectMode: selectMode,
                         isSelected: selection.contains(container.id),
                         onToggle: { toggle(container.id) },
-                        showLogs: { openWindow(value: container) }
+                        showLogs: { openWindow(value: container) },
+                        listName: list?.name,
+                        onRemoveFromList: {
+                            if let list { state.removeFromList(list.id, keys: [container.membershipKey]) }
+                        }
                     )
                 }
                 .listStyle(.inset)
             }
         }
-        .navigationTitle("Containers")
+        .navigationTitle(list?.name ?? "Containers")
         .searchable(text: $search, isPresented: $searchPresented, placement: .toolbar, prompt: "Filter containers")
         .onChange(of: state.findRequestToken) { searchPresented = true }
         .safeAreaInset(edge: .bottom) {
-            if selectMode {
-                SelectionBar(count: selected.count, total: filtered.count,
-                             onSelectAll: { selection = Set(filtered.map(\.id)) },
-                             onClear: { selection.removeAll() }) {
-                    Button("Start") { state.startContainers(selected) }
-                    Button("Stop") { state.stopContainers(selected) }
-                    Button("Restart") { state.restartContainers(selected) }
-                    Button("Remove", role: .destructive) { confirmRemove = true }
-                }
-            }
+            if selectMode { bulkBar }
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -92,17 +106,76 @@ struct ContainersView: View {
             }
             RefreshButton()
         }
-        .confirmationDialog("Remove \(selected.count) container\(selected.count == 1 ? "" : "s")?",
-                            isPresented: $confirmRemove, titleVisibility: .visible) {
-            Button("Remove", role: .destructive) {
-                state.removeContainers(selected)
-                selectMode = false
-                selection.removeAll()
+        .confirmationDialog(bulkRemoveTitle, isPresented: $confirmRemove, titleVisibility: .visible) {
+            if let list {
+                Button("Remove from \(list.name)") {
+                    state.removeFromList(list.id, keys: selected.map(\.membershipKey))
+                    endSelect()
+                }
+                Button("Delete Container\(selected.count == 1 ? "" : "s")", role: .destructive) {
+                    state.removeContainers(selected)
+                    endSelect()
+                }
+            } else {
+                Button("Remove", role: .destructive) {
+                    state.removeContainers(selected)
+                    endSelect()
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Running containers will be force-removed. This cannot be undone.")
+            Text(list == nil
+                 ? "Running containers will be force-removed. This cannot be undone."
+                 : "Remove takes them out of this list only. Delete force-removes them from Docker (and every list) — this cannot be undone.")
         }
+        .sheet(isPresented: $creatingListFromSelection) {
+            ListEditorSheet(mode: .create(prefill: selected.map(\.membershipKey)))
+        }
+    }
+
+    /// Bottom bulk-action bar shown in Select mode. Extracted from `body` to keep
+    /// the main view expression within the type-checker's reach.
+    @ViewBuilder
+    private var bulkBar: some View {
+        SelectionBar(count: selected.count, total: filtered.count,
+                     onSelectAll: { selection = Set(filtered.map(\.id)) },
+                     onClear: { selection.removeAll() }) {
+            Button("Start") { state.startContainers(selected) }
+            Button("Stop") { state.stopContainers(selected) }
+            Button("Restart") { state.restartContainers(selected) }
+            addToListMenu
+            Button(list == nil ? "Remove" : "Remove…", role: .destructive) { confirmRemove = true }
+        }
+    }
+
+    /// "Add to List" bulk action: create a new list from the selection, or fold it
+    /// into an existing one.
+    @ViewBuilder
+    private var addToListMenu: some View {
+        Menu("Add to List") {
+            Button("New List…") { creatingListFromSelection = true }
+            if !state.containerLists.isEmpty {
+                Divider()
+                ForEach(state.containerLists) { l in
+                    Button(l.name) { state.addToList(l.id, containers: selected) }
+                }
+            }
+        }
+        .fixedSize()
+    }
+
+    /// Bulk-remove dialog title, scoped to the current list when there is one.
+    private var bulkRemoveTitle: String {
+        let n = selected.count
+        let noun = "container\(n == 1 ? "" : "s")"
+        if let list { return "Remove \(n) \(noun) from \(list.name)?" }
+        return "Remove \(n) \(noun)?"
+    }
+
+    /// Leaves Select mode and clears the current selection.
+    private func endSelect() {
+        selectMode = false
+        selection.removeAll()
     }
 
     private func toggle(_ id: String) {
@@ -139,6 +212,10 @@ private struct ContainerRow: View {
     let isSelected: Bool
     let onToggle: () -> Void
     let showLogs: () -> Void
+    // Non-nil when the row is shown inside a custom list: the ⋯ menu then offers
+    // "Remove from <list>" (detach) alongside a destructive "Delete Container…".
+    let listName: String?
+    let onRemoveFromList: () -> Void
     // Drives the per-container removal confirmation from the row's ⋯ menu.
     @State private var confirmRemove = false
 
@@ -202,9 +279,12 @@ private struct ContainerRow: View {
             }
         }
         .padding(.vertical, 4)
-        .confirmationDialog("Remove \(container.displayName)?",
+        .confirmationDialog(listName == nil ? "Remove \(container.displayName)?"
+                                            : "Delete \(container.displayName)?",
                             isPresented: $confirmRemove, titleVisibility: .visible) {
-            Button("Remove", role: .destructive) { state.removeContainer(container) }
+            Button(listName == nil ? "Remove" : "Delete Container", role: .destructive) {
+                state.removeContainer(container)
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(container.isRunning
@@ -240,7 +320,12 @@ private struct ContainerRow: View {
                 Button("Open Shell…") { state.openShell(container) }
             }
             Divider()
-            Button("Remove", role: .destructive) { confirmRemove = true }
+            if let listName {
+                Button("Remove from \(listName)", action: onRemoveFromList)
+                Button("Delete Container…", role: .destructive) { confirmRemove = true }
+            } else {
+                Button("Remove", role: .destructive) { confirmRemove = true }
+            }
         } label: {
             Image(systemName: "ellipsis.circle")
         }
