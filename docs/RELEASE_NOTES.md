@@ -4,6 +4,14 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.5.1
+
+- 🔍 The list editor now has a **filter box** over the container checklist —
+  substring, case-insensitive on name and image, matching the Containers and
+  Images search. Makes large lists navigable when picking members.
+- 🧹 Dropped the redundant sidebar **Rename…** menu; a list's name is edited in
+  the same **Edit…** sheet as its membership.
+
 ## v0.5.0 — Custom container lists
 
 - 🗂️ **Custom container lists** under the Containers sidebar item — create,
