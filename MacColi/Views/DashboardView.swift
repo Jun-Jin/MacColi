@@ -42,12 +42,10 @@ struct DashboardView: View {
     @State private var containersExpanded = true
 
     // Container-list editing UI. `creating` presents the new-list sheet; `editing`
-    // presents the membership editor for an existing list; `renaming`/`renameText`
-    // drive the quick-rename alert; `pendingDelete` drives the delete confirmation.
+    // presents the name + membership editor for an existing list; `pendingDelete`
+    // drives the delete confirmation.
     @State private var creating = false
     @State private var editing: ContainerList?
-    @State private var renaming: ContainerList?
-    @State private var renameText = ""
     @State private var pendingDelete: ContainerList?
 
     var body: some View {
@@ -79,15 +77,6 @@ struct DashboardView: View {
         }
         .sheet(item: $editing) { list in
             ListEditorSheet(mode: .edit(list))
-        }
-        .alert("Rename List", isPresented: renamingBinding) {
-            TextField("Name", text: $renameText)
-            Button("Rename") {
-                if let renaming, !renameText.trimmingCharacters(in: .whitespaces).isEmpty {
-                    state.renameList(renaming.id, to: renameText)
-                }
-            }
-            Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog("Delete list \(pendingDelete?.name ?? "")?",
                             isPresented: pendingDeleteBinding, titleVisibility: .visible,
@@ -124,7 +113,6 @@ struct DashboardView: View {
                         .tag(SidebarSelection.list(list.id))
                         .contextMenu {
                             Button("Edit…") { editing = list }
-                            Button("Rename…") { renaming = list; renameText = list.name }
                             Divider()
                             Button("Delete", role: .destructive) { pendingDelete = list }
                         }
@@ -151,11 +139,6 @@ struct DashboardView: View {
         .listStyle(.sidebar)
     }
 
-    /// Presenting a rename via `.alert(isPresented:)` needs a Bool binding; derive
-    /// it from `renaming` so dismissal clears the target.
-    private var renamingBinding: Binding<Bool> {
-        Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })
-    }
     private var pendingDeleteBinding: Binding<Bool> {
         Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })
     }

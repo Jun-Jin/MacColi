@@ -20,6 +20,9 @@ struct ListEditorSheet: View {
 
     @State private var name: String
     @State private var selected: Set<String>
+    /// Text filter over the container checklist. View-only: it never changes
+    /// which keys are in `selected`, just which rows are visible.
+    @State private var query = ""
 
     init(mode: Mode, onCreate: ((ContainerList.ID) -> Void)? = nil) {
         self.mode = mode
@@ -64,6 +67,8 @@ struct ListEditorSheet: View {
             .padding(.top, 12)
             .padding(.bottom, 4)
 
+            if !state.containers.isEmpty { searchField }
+
             containerPicker
 
             Divider()
@@ -81,14 +86,49 @@ struct ListEditorSheet: View {
         .frame(width: 420, height: 540)
     }
 
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Filter containers", text: $query)
+                .textFieldStyle(.plain)
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Clear filter")
+            }
+        }
+        .padding(.vertical, 5)
+        .padding(.horizontal, 8)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal)
+        .padding(.bottom, 4)
+    }
+
+    /// The checklist filtered by `query`. Empty query shows everything; otherwise
+    /// each row must match on its name or image — substring, case-insensitive,
+    /// matching the search in ContainersView / ImagesView.
+    private var visibleContainers: [Container] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return state.containers }
+        return state.containers.filter {
+            $0.displayName.lowercased().contains(q) || $0.image.lowercased().contains(q)
+        }
+    }
+
     @ViewBuilder
     private var containerPicker: some View {
         if state.containers.isEmpty {
             ContentUnavailableView("No containers", systemImage: "shippingbox",
                                    description: Text("Run a container first, then add it here."))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if visibleContainers.isEmpty {
+            ContentUnavailableView.search(text: query)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List(state.containers) { c in
+            List(visibleContainers) { c in
                 HStack(spacing: 12) {
                     SelectionCheckmark(isSelected: selected.contains(c.membershipKey))
                     Circle()
