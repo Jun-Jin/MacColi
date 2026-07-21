@@ -32,6 +32,9 @@ struct LogsView: View {
                     .toggleStyle(.switch)
                     .controlSize(.mini)
                     .help("Stream new log lines live")
+                Button { clear() } label: { Image(systemName: "trash") }
+                    .help("Clear the view (docker's stored logs are kept — Reload restores them)")
+                    .disabled(isLoading || text.isEmpty)
                 Button { Task { await loadSnapshot() } } label: { Image(systemName: "arrow.clockwise") }
                     .help("Reload")
                     .disabled(follow)
@@ -79,6 +82,15 @@ struct LogsView: View {
         // Toggling Follow (or dismissing) cancels this task, which terminates the
         // stream process and stops the flush loop.
         .task(id: follow) { follow ? await startFollowing() : await loadSnapshot() }
+    }
+
+    /// Empties the visible log. Clears the stream buffer too, so while following
+    /// the next flush rebuilds from new lines only instead of repainting the
+    /// cleared history. View-only: docker's stored logs are untouched.
+    private func clear() {
+        buffer.clear()
+        text = ""
+        pendingInitialScroll = false
     }
 
     /// One-shot snapshot of the current tail (the default, frozen view).
