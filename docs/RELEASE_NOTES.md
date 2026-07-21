@@ -4,6 +4,19 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.6.0 — Workflows
+
+- ⚡ **Workflows** — save shell-command sequences as one-click tiles on a new
+  sidebar panel (or run them from the menu bar's **Run Workflow** submenu).
+  Steps run in order with `zsh` in the workflow's working directory and the
+  app's PATH/`DOCKER_HOST` environment, stopping at the first failure; the run
+  sheet streams per-step output live and shows the running step's PID. Steps
+  can chain other workflows (composition, with cycle detection), tiles section
+  by an optional group, and the editor toggles each step between a one-line
+  command and an expanded script area.
+- 🗑️ The container log window gained a **clear** button — empties the view
+  (docker's stored logs are kept; Reload restores them).
+
 ## v0.5.1
 
 - 🔍 The list editor now has a **filter box** over the container checklist —
