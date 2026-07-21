@@ -84,10 +84,15 @@ actor ProcessRunner {
     func runStreaming(_ launchPath: String,
                       _ arguments: [String],
                       environment: [String: String]? = nil,
+                      currentDirectory: String? = nil,
+                      onStart: (@Sendable (Int32) -> Void)? = nil,
                       onOutput: @escaping @Sendable (String) -> Void) async throws -> Int32 {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: launchPath)
         process.arguments = arguments
+        if let currentDirectory {
+            process.currentDirectoryURL = URL(fileURLWithPath: currentDirectory)
+        }
 
         var env = ProcessInfo.processInfo.environment
         if let environment { env.merge(environment) { _, new in new } }
@@ -99,6 +104,7 @@ actor ProcessRunner {
         process.standardError = pipe
 
         try process.run()
+        onStart?(process.processIdentifier)
 
         // Terminate the process if the awaiting task is cancelled. Essential for
         // never-exiting streams like `docker logs --follow`: terminating closes

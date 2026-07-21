@@ -3,6 +3,7 @@ import SwiftUI
 /// Contents of the menu bar dropdown.
 struct MenuBarView: View {
     @Environment(AppState.self) private var state
+    @Environment(WorkflowStore.self) private var workflows
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -25,6 +26,18 @@ struct MenuBarView: View {
                 Text(state.colimaState.label)
             default:
                 Button("Start Colima") { state.startColima() }
+            }
+
+            // One-click workflow triggers, mirroring the tiles' Run buttons. An
+            // already-running workflow is disabled rather than queued.
+            if !workflows.workflows.isEmpty {
+                Divider()
+                Menu("Run Workflow") {
+                    ForEach(workflows.workflows) { workflow in
+                        Button(workflow.name) { workflows.run(workflow.id) }
+                            .disabled(workflows.isRunning(workflow.id))
+                    }
+                }
             }
 
             Divider()

@@ -6,6 +6,9 @@ struct MacColiApp: App {
     // The app owns the single AppState instance; `@State` preserves it across
     // redraws and is the correct owner for an `@Observable` model.
     @State private var state = AppState()
+    // Saved workflows and their runs, separate from AppState: workflows don't
+    // depend on the Colima lifecycle and their runs outlive panel switches.
+    @State private var workflowStore = WorkflowStore()
 
     // Brings a bare `swift run` build to the front (see AppDelegate). No-op for
     // the shipped .app, which LaunchServices already activates.
@@ -16,6 +19,7 @@ struct MacColiApp: App {
         Window("MacColi", id: WindowID.dashboard) {
             DashboardView()
                 .environment(state)
+                .environment(workflowStore)
                 .frame(minWidth: 820, minHeight: 520)
                 .task { state.startPolling() }
         }
@@ -46,6 +50,7 @@ struct MacColiApp: App {
         MenuBarExtra {
             MenuBarView()
                 .environment(state)
+                .environment(workflowStore)
         } label: {
             Image(systemName: state.colimaState.isRunning ? "shippingbox.fill" : "shippingbox")
         }

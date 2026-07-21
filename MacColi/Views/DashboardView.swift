@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum Panel: String, CaseIterable, Identifiable {
-    case containers, images, volumes, networks, settings
+    case containers, images, volumes, networks, workflows, settings
     var id: String { rawValue }
 
     var title: String {
@@ -10,6 +10,7 @@ enum Panel: String, CaseIterable, Identifiable {
         case .images: return "Images"
         case .volumes: return "Volumes"
         case .networks: return "Networks"
+        case .workflows: return "Workflows"
         case .settings: return "Settings"
         }
     }
@@ -20,6 +21,7 @@ enum Panel: String, CaseIterable, Identifiable {
         case .images: return "square.stack.3d.up"
         case .volumes: return "externaldrive"
         case .networks: return "point.3.connected.trianglepath.dotted"
+        case .workflows: return "flowchart"
         case .settings: return "gearshape"
         }
     }
@@ -32,7 +34,7 @@ enum Panel: String, CaseIterable, Identifiable {
 enum SidebarSelection: Hashable {
     case containers                 // "All Containers"
     case list(UUID)
-    case images, volumes, networks, settings
+    case images, volumes, networks, workflows, settings
 }
 
 struct DashboardView: View {
@@ -133,6 +135,8 @@ struct DashboardView: View {
                 .tag(SidebarSelection.volumes)
             Label(Panel.networks.title, systemImage: Panel.networks.systemImage)
                 .tag(SidebarSelection.networks)
+            Label(Panel.workflows.title, systemImage: Panel.workflows.systemImage)
+                .tag(SidebarSelection.workflows)
             Label(Panel.settings.title, systemImage: Panel.settings.systemImage)
                 .tag(SidebarSelection.settings)
         }
@@ -150,6 +154,7 @@ struct DashboardView: View {
         case .images: return .images
         case .volumes: return .volumes
         case .networks: return .networks
+        case .workflows: return .workflows
         case .settings: return .settings
         }
     }
@@ -171,6 +176,7 @@ struct DashboardView: View {
         case .images: ImagesView()
         case .volumes: VolumesView()
         case .networks: NetworksView()
+        case .workflows: WorkflowsView()
         case .settings: SettingsView()
         }
     }
