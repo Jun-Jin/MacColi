@@ -19,6 +19,8 @@ Lives in the menu bar with a full dashboard window:
 - **Images** — list, pull, remove.
 - **Volumes** — list, create, remove, with per-volume disk usage.
 - **Networks** — list, create, remove.
+- **Workflows** — save shell-command sequences as one-click tiles with live
+  per-step feedback, chainable into each other. See [Workflows](#workflows).
 
 Resource panels support multi-select bulk actions and a **Clean Up** system
 prune. Every panel has a filter field — press **⌘F** to focus it and narrow the
@@ -43,6 +45,40 @@ set at a time. Alongside them sits **All Containers**, the full unfiltered list.
   leaving the container running) or *delete the container* (`docker rm`, which
   drops it from every list). Deleting a container anywhere removes it from all
   lists.
+
+## Workflows
+
+Save a sequence of shell commands as a named tile on the **Workflows** panel and
+rerun it with one click — from the tile's **Run** button, or from the menu bar's
+**Run Workflow** submenu without opening the dashboard.
+
+- A workflow has a **working directory** (`~` works; pick one with the folder
+  chooser) and ordered **steps**. A step is a shell command — the editor toggles
+  each step between a one-line field and an expanded script area — or a **chain**
+  to another saved workflow.
+- Steps run **sequentially** as `zsh -lc` in the working directory, with the same
+  PATH / `COLIMA_HOME` / `DOCKER_HOST` environment the rest of the app uses — so
+  `git`, `make`, and `docker` behave exactly as in your terminal, and docker
+  commands target the Colima VM. No shebang is needed. The first non-zero exit
+  stops the run; later steps are marked *skipped*.
+- **Live feedback** — the tile shows a status badge, and while running, the
+  active step's PID next to a spinner. Click the tile for the run sheet:
+  per-step status icons and streaming output (running and failed steps
+  auto-expand), plus **Stop** / **Run Again**. Stop terminates the in-flight
+  step's process.
+- **Chaining & grouping** — a chained workflow's steps run inline, in *its own*
+  working directory, so a shared prefix like "sync main" is composed rather than
+  duplicated. Circular chains are detected and refused at run time. The optional
+  **group** field sections the tile grid.
+- Definitions are stored locally in `UserDefaults` (like container lists); the
+  last run's result is kept per workflow for the session.
+
+Example — sync, start, tail:
+
+1. `git fetch origin main && git checkout origin/main`
+2. `make task.start`
+3. `docker logs --tail 100 myapp` — prefer `--tail` over `--follow` here: a
+   following step never exits, so the run would show as running until stopped.
 
 ## Requirements
 
@@ -116,7 +152,8 @@ after each build so `open MacColi.app` runs the latest binary. Releases
 - `MacColi/Services` — `ProcessRunner` (async subprocess execution),
   `CLI` (binary resolution + PATH/`DOCKER_HOST` setup), `ColimaService`,
   `DockerService` (which also opens an interactive shell via
-  `open -a Terminal`), and `JSONLines`.
+  `open -a Terminal`), `WorkflowStore` (saved workflows + their run engine),
+  and `JSONLines`.
 - `MacColi/Models` — Codable models decoded from `colima list --json` and
   `docker … --format '{{json .}}'`.
 - `MacColi/Views` — dashboard, menu bar, and per-resource panels.
