@@ -43,15 +43,33 @@ struct Workflow: Identifiable, Codable, Hashable {
     var group: String
     /// Where shell steps run. `~` is expanded; empty falls back to the user's home.
     var workingDirectory: String
+    /// Optional file (`~/.zshrc`, a project env file, …) sourced before each
+    /// shell step so functions, aliases, and variables defined there are
+    /// available. `~` is expanded; empty means nothing extra is sourced.
+    var sourceFile: String
     var steps: [WorkflowStep]
 
     init(id: UUID = UUID(), name: String = "", group: String = "",
-         workingDirectory: String = "~", steps: [WorkflowStep] = []) {
+         workingDirectory: String = "~", sourceFile: String = "",
+         steps: [WorkflowStep] = []) {
         self.id = id
         self.name = name
         self.group = group
         self.workingDirectory = workingDirectory
+        self.sourceFile = sourceFile
         self.steps = steps
+    }
+
+    // Custom decoding only so workflows persisted before `sourceFile` existed
+    // still load (a thrown decode would silently drop every saved workflow).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        group = try container.decode(String.self, forKey: .group)
+        workingDirectory = try container.decode(String.self, forKey: .workingDirectory)
+        sourceFile = try container.decodeIfPresent(String.self, forKey: .sourceFile) ?? ""
+        steps = try container.decode([WorkflowStep].self, forKey: .steps)
     }
 }
 
@@ -75,6 +93,9 @@ struct WorkflowRunStep: Identifiable, Equatable {
     let title: String
     let command: String
     let workingDirectory: String
+    /// The owning workflow's source file (empty when none) — like
+    /// `workingDirectory`, a chained step keeps its own workflow's value.
+    var sourceFile: String = ""
     var phase: Phase = .pending
     var output: String = ""
     /// PID of the step's `zsh` process, set once it launches. Children the step

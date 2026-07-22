@@ -138,7 +138,8 @@ final class WorkflowStore {
                 guard !trimmed.isEmpty else { continue }
                 result.append(WorkflowRunStep(title: titlePrefix + WorkflowStep.summary(of: trimmed),
                                               command: trimmed,
-                                              workingDirectory: workflow.workingDirectory))
+                                              workingDirectory: workflow.workingDirectory,
+                                              sourceFile: workflow.sourceFile))
             case .runWorkflow(let subID):
                 guard let sub = self.workflow(subID) else { throw WorkflowError.missingReference }
                 guard subID != workflow.id, !path.contains(subID) else {
@@ -174,12 +175,29 @@ final class WorkflowStore {
                 break
             }
 
+            var command = step.command
+            if !step.sourceFile.trimmingCharacters(in: .whitespaces).isEmpty {
+                let sourcePath = Self.expandPath(step.sourceFile)
+                guard FileManager.default.fileExists(atPath: sourcePath) else {
+                    runs[id]?.steps[index].phase =
+                        .failed("Source file “\(step.sourceFile)” was not found.")
+                    skipRemaining(id, from: index + 1)
+                    break
+                }
+                // The step body must go through `eval`: zsh parses the whole
+                // `-c` string before `source` runs, and alias expansion happens
+                // at parse time — without the re-parse, sourced functions would
+                // work but sourced aliases would not.
+                command = "source \(Self.shellQuoted(sourcePath))\n"
+                    + "eval \(Self.shellQuoted(step.command))"
+            }
+
             runs[id]?.steps[index].phase = .running
             do {
                 // `-l` sources login profiles so user-managed env (nvm, asdf,
                 // exported variables a Makefile expects, …) is in place.
                 let code = try await runner.runStreaming(
-                    "/bin/zsh", ["-lc", step.command],
+                    "/bin/zsh", ["-lc", command],
                     environment: environment,
                     currentDirectory: directory,
                     onStart: { [weak self] pid in
@@ -228,6 +246,11 @@ final class WorkflowStore {
         if let output = runs[id]?.steps[index].output, output.utf8.count > Self.outputCap {
             runs[id]?.steps[index].output = String(output.suffix(Self.outputCap / 2))
         }
+    }
+
+    /// Wraps a string in single quotes for safe embedding in a zsh command.
+    private static func shellQuoted(_ string: String) -> String {
+        "'" + string.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     private static func expandPath(_ raw: String) -> String {

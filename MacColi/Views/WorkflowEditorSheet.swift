@@ -19,6 +19,7 @@ struct WorkflowEditorSheet: View {
     @State private var name: String
     @State private var group: String
     @State private var workingDirectory: String
+    @State private var sourceFile: String
     @State private var steps: [WorkflowStep]
     @State private var pickingDirectory = false
     /// Shell steps showing the expanded script area instead of the one-line
@@ -34,11 +35,13 @@ struct WorkflowEditorSheet: View {
             _name = State(initialValue: "")
             _group = State(initialValue: "")
             _workingDirectory = State(initialValue: "~")
+            _sourceFile = State(initialValue: "")
             initialSteps = [WorkflowStep(action: .shell(command: ""))]
         case .edit(let workflow):
             _name = State(initialValue: workflow.name)
             _group = State(initialValue: workflow.group)
             _workingDirectory = State(initialValue: workflow.workingDirectory)
+            _sourceFile = State(initialValue: workflow.sourceFile)
             initialSteps = workflow.steps
         }
         _steps = State(initialValue: initialSteps)
@@ -89,6 +92,14 @@ struct WorkflowEditorSheet: View {
                             .autocorrectionDisabled()
                         Button("Choose…") { pickingDirectory = true }
                     }
+                    HStack(spacing: 6) {
+                        TextField("Source File", text: $sourceFile,
+                                  prompt: Text("Optional — e.g. ~/.zshrc"))
+                            .autocorrectionDisabled()
+                        Button("Choose…") { chooseSourceFile() }
+                    }
+                } footer: {
+                    Text("The source file is sourced before each step, so functions and aliases defined there (e.g. in ~/.zshrc) can be used in steps.")
                 }
 
                 Section {
@@ -114,7 +125,7 @@ struct WorkflowEditorSheet: View {
                 } header: {
                     Text("Steps")
                 } footer: {
-                    Text("Steps run in order with zsh in the working directory; the run stops at the first failing step. A chained workflow's steps run in its own working directory.")
+                    Text("Steps run in order with zsh in the working directory; the run stops at the first failing step. A chained workflow's steps run in its own working directory, with its own source file.")
                 }
             }
             .formStyle(.grouped)
@@ -247,12 +258,28 @@ struct WorkflowEditorSheet: View {
         )
     }
 
+    /// NSOpenPanel rather than a second `.fileImporter`: presentation modifiers
+    /// inside grouped-Form rows don't fire reliably, and fileImporter hides
+    /// dotfiles — the typical pick here (`~/.zshrc`) is one.
+    private func chooseSourceFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        if panel.runModal() == .OK, let url = panel.url {
+            sourceFile = (url.path as NSString).abbreviatingWithTildeInPath
+        }
+    }
+
     private func save() {
         let workflow = Workflow(
             id: editedID ?? UUID(),
             name: trimmedName,
             group: group.trimmingCharacters(in: .whitespaces),
             workingDirectory: workingDirectory.trimmingCharacters(in: .whitespaces),
+            sourceFile: sourceFile.trimmingCharacters(in: .whitespaces),
             steps: steps
         )
         store.save(workflow)
