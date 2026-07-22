@@ -4,6 +4,16 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.6.1
+
+- 📦 **Workflow source files** — a workflow can list files (`~/.zshrc`, a
+  project env file, …) that are sourced in order before each shell step, so
+  functions and aliases defined there work in steps — plain `zsh -lc` loads
+  login profiles but not `~/.zshrc`. The editor's file chooser shows dotfiles,
+  and a chained workflow keeps its own list, like its working directory.
+- 🖱️ Right-click blank space on the Workflows panel to create a workflow, and
+  hover a tile for a pencil button that opens the editor.
+
 ## v0.6.0 — Workflows
 
 - ⚡ **Workflows** — save shell-command sequences as one-click tiles on a new
