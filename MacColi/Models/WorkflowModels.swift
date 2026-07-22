@@ -43,32 +43,42 @@ struct Workflow: Identifiable, Codable, Hashable {
     var group: String
     /// Where shell steps run. `~` is expanded; empty falls back to the user's home.
     var workingDirectory: String
-    /// Optional file (`~/.zshrc`, a project env file, …) sourced before each
-    /// shell step so functions, aliases, and variables defined there are
-    /// available. `~` is expanded; empty means nothing extra is sourced.
-    var sourceFile: String
+    /// Optional files (`~/.zshrc`, a project env file, …) sourced in order
+    /// before each shell step so functions, aliases, and variables defined
+    /// there are available. `~` is expanded in each.
+    var sourceFiles: [String]
     var steps: [WorkflowStep]
 
     init(id: UUID = UUID(), name: String = "", group: String = "",
-         workingDirectory: String = "~", sourceFile: String = "",
+         workingDirectory: String = "~", sourceFiles: [String] = [],
          steps: [WorkflowStep] = []) {
         self.id = id
         self.name = name
         self.group = group
         self.workingDirectory = workingDirectory
-        self.sourceFile = sourceFile
+        self.sourceFiles = sourceFiles
         self.steps = steps
     }
 
-    // Custom decoding only so workflows persisted before `sourceFile` existed
-    // still load (a thrown decode would silently drop every saved workflow).
+    /// Key of the short-lived single-file predecessor of `sourceFiles`.
+    private enum LegacyCodingKeys: String, CodingKey { case sourceFile }
+
+    // Custom decoding only so workflows persisted by older builds still load
+    // (a thrown decode would silently drop every saved workflow): a missing
+    // key means [], and a single `sourceFile` string folds into `sourceFiles`.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         group = try container.decode(String.self, forKey: .group)
         workingDirectory = try container.decode(String.self, forKey: .workingDirectory)
-        sourceFile = try container.decodeIfPresent(String.self, forKey: .sourceFile) ?? ""
+        if let files = try container.decodeIfPresent([String].self, forKey: .sourceFiles) {
+            sourceFiles = files
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+            let single = try legacy.decodeIfPresent(String.self, forKey: .sourceFile) ?? ""
+            sourceFiles = single.isEmpty ? [] : [single]
+        }
         steps = try container.decode([WorkflowStep].self, forKey: .steps)
     }
 }
@@ -93,9 +103,9 @@ struct WorkflowRunStep: Identifiable, Equatable {
     let title: String
     let command: String
     let workingDirectory: String
-    /// The owning workflow's source file (empty when none) — like
-    /// `workingDirectory`, a chained step keeps its own workflow's value.
-    var sourceFile: String = ""
+    /// The owning workflow's source files (empty when none) — like
+    /// `workingDirectory`, a chained step keeps its own workflow's values.
+    var sourceFiles: [String] = []
     var phase: Phase = .pending
     var output: String = ""
     /// PID of the step's `zsh` process, set once it launches. Children the step

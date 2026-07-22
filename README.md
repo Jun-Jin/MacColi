@@ -56,10 +56,10 @@ rerun it with one click — from the tile's **Run** button, or from the menu bar
   chooser) and ordered **steps**. A step is a shell command — the editor toggles
   each step between a one-line field and an expanded script area — or a **chain**
   to another saved workflow.
-- An optional **source file** (e.g. `~/.zshrc` or a project env file) is sourced
-  before each step, so functions, aliases, and variables you define there can be
-  used in steps. (Plain `zsh -lc` loads login profiles but not `~/.zshrc`, so
-  without this your interactive aliases aren't available.)
+- Optional **source files** (e.g. `~/.zshrc` or a project env file) are sourced
+  in order before each step, so functions, aliases, and variables you define
+  there can be used in steps. (Plain `zsh -lc` loads login profiles but not
+  `~/.zshrc`, so without this your interactive aliases aren't available.)
 - Steps run **sequentially** as `zsh -lc` in the working directory, with the same
   PATH / `COLIMA_HOME` / `DOCKER_HOST` environment the rest of the app uses — so
   `git`, `make`, and `docker` behave exactly as in your terminal, and docker

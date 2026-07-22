@@ -139,7 +139,7 @@ final class WorkflowStore {
                 result.append(WorkflowRunStep(title: titlePrefix + WorkflowStep.summary(of: trimmed),
                                               command: trimmed,
                                               workingDirectory: workflow.workingDirectory,
-                                              sourceFile: workflow.sourceFile))
+                                              sourceFiles: workflow.sourceFiles))
             case .runWorkflow(let subID):
                 guard let sub = self.workflow(subID) else { throw WorkflowError.missingReference }
                 guard subID != workflow.id, !path.contains(subID) else {
@@ -176,11 +176,15 @@ final class WorkflowStore {
             }
 
             var command = step.command
-            if !step.sourceFile.trimmingCharacters(in: .whitespaces).isEmpty {
-                let sourcePath = Self.expandPath(step.sourceFile)
-                guard FileManager.default.fileExists(atPath: sourcePath) else {
+            let sourceFiles = step.sourceFiles
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            if !sourceFiles.isEmpty {
+                if let missing = sourceFiles.first(where: {
+                    !FileManager.default.fileExists(atPath: Self.expandPath($0))
+                }) {
                     runs[id]?.steps[index].phase =
-                        .failed("Source file “\(step.sourceFile)” was not found.")
+                        .failed("Source file “\(missing)” was not found.")
                     skipRemaining(id, from: index + 1)
                     break
                 }
@@ -188,8 +192,9 @@ final class WorkflowStore {
                 // `-c` string before `source` runs, and alias expansion happens
                 // at parse time — without the re-parse, sourced functions would
                 // work but sourced aliases would not.
-                command = "source \(Self.shellQuoted(sourcePath))\n"
-                    + "eval \(Self.shellQuoted(step.command))"
+                command = (sourceFiles.map { "source \(Self.shellQuoted(Self.expandPath($0)))" }
+                    + ["eval \(Self.shellQuoted(step.command))"])
+                    .joined(separator: "\n")
             }
 
             runs[id]?.steps[index].phase = .running

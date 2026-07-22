@@ -1,8 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Create or edit a workflow: name, tile group, working directory, and the
-/// ordered step list. A step is either a shell command or a chain to another
+/// Create or edit a workflow: name, tile group, working directory, source
+/// files, and the ordered step list. A step is either a shell command or a chain to another
 /// saved workflow; steps reorder by drag and the whole thing saves as one
 /// tile on the Workflows panel.
 struct WorkflowEditorSheet: View {
@@ -16,10 +16,17 @@ struct WorkflowEditorSheet: View {
     @Environment(WorkflowStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
+    /// Identity wrapper so source-file rows keep stable identity through
+    /// reordering and removal; paths flatten back to `[String]` on save.
+    private struct SourceFileEntry: Identifiable {
+        let id = UUID()
+        var path: String
+    }
+
     @State private var name: String
     @State private var group: String
     @State private var workingDirectory: String
-    @State private var sourceFile: String
+    @State private var sourceFiles: [SourceFileEntry]
     @State private var steps: [WorkflowStep]
     @State private var pickingDirectory = false
     /// Shell steps showing the expanded script area instead of the one-line
@@ -35,13 +42,13 @@ struct WorkflowEditorSheet: View {
             _name = State(initialValue: "")
             _group = State(initialValue: "")
             _workingDirectory = State(initialValue: "~")
-            _sourceFile = State(initialValue: "")
+            _sourceFiles = State(initialValue: [])
             initialSteps = [WorkflowStep(action: .shell(command: ""))]
         case .edit(let workflow):
             _name = State(initialValue: workflow.name)
             _group = State(initialValue: workflow.group)
             _workingDirectory = State(initialValue: workflow.workingDirectory)
-            _sourceFile = State(initialValue: workflow.sourceFile)
+            _sourceFiles = State(initialValue: workflow.sourceFiles.map { SourceFileEntry(path: $0) })
             initialSteps = workflow.steps
         }
         _steps = State(initialValue: initialSteps)
@@ -92,14 +99,32 @@ struct WorkflowEditorSheet: View {
                             .autocorrectionDisabled()
                         Button("Choose…") { pickingDirectory = true }
                     }
-                    HStack(spacing: 6) {
-                        TextField("Source File", text: $sourceFile,
-                                  prompt: Text("Optional — e.g. ~/.zshrc"))
-                            .autocorrectionDisabled()
-                        Button("Choose…") { chooseSourceFile() }
+                }
+
+                Section {
+                    ForEach($sourceFiles) { $entry in
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc.text").foregroundStyle(.secondary)
+                            TextField("Source file", text: $entry.path,
+                                      prompt: Text("~/.zshrc, a project env file, …"))
+                                .labelsHidden()
+                                .autocorrectionDisabled()
+                            Button("Choose…") { chooseSourceFile(for: entry.id) }
+                            removeButton { sourceFiles.removeAll { $0.id == entry.id } }
+                        }
                     }
+                    .onMove { sourceFiles.move(fromOffsets: $0, toOffset: $1) }
+                    .onDelete { sourceFiles.remove(atOffsets: $0) }
+
+                    Button {
+                        sourceFiles.append(SourceFileEntry(path: ""))
+                    } label: {
+                        Label("Add Source File", systemImage: "plus")
+                    }
+                } header: {
+                    Text("Source Files")
                 } footer: {
-                    Text("The source file is sourced before each step, so functions and aliases defined there (e.g. in ~/.zshrc) can be used in steps.")
+                    Text("Sourced in order before each step, so functions and aliases defined there (e.g. in ~/.zshrc) can be used in steps. Blank rows are ignored.")
                 }
 
                 Section {
@@ -125,7 +150,7 @@ struct WorkflowEditorSheet: View {
                 } header: {
                     Text("Steps")
                 } footer: {
-                    Text("Steps run in order with zsh in the working directory; the run stops at the first failing step. A chained workflow's steps run in its own working directory, with its own source file.")
+                    Text("Steps run in order with zsh in the working directory; the run stops at the first failing step. A chained workflow's steps run in its own working directory, with its own source files.")
                 }
             }
             .formStyle(.grouped)
@@ -175,7 +200,7 @@ struct WorkflowEditorSheet: View {
                 }
                 .labelsHidden()
                 Spacer()
-                removeButton(step.wrappedValue.id)
+                removeButton { steps.removeAll { $0.id == step.wrappedValue.id } }
             }
         }
     }
@@ -189,7 +214,7 @@ struct WorkflowEditorSheet: View {
                 .font(.body.monospaced())
                 .autocorrectionDisabled()
             expandButton(step.wrappedValue.id, expand: true)
-            removeButton(step.wrappedValue.id)
+            removeButton { steps.removeAll { $0.id == step.wrappedValue.id } }
         }
     }
 
@@ -202,7 +227,7 @@ struct WorkflowEditorSheet: View {
                 Text("Script").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 expandButton(step.wrappedValue.id, expand: false)
-                removeButton(step.wrappedValue.id)
+                removeButton { steps.removeAll { $0.id == step.wrappedValue.id } }
             }
             TextEditor(text: shellBinding(step))
                 .font(.body.monospaced())
@@ -229,13 +254,13 @@ struct WorkflowEditorSheet: View {
         .help(expand ? "Expand to script area" : "Collapse to one line")
     }
 
-    private func removeButton(_ id: UUID) -> some View {
-        Button { steps.removeAll { $0.id == id } } label: {
+    private func removeButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             Image(systemName: "minus.circle.fill")
         }
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
-        .help("Remove step")
+        .help("Remove")
     }
 
     private func shellBinding(_ step: Binding<WorkflowStep>) -> Binding<String> {
@@ -261,15 +286,16 @@ struct WorkflowEditorSheet: View {
     /// NSOpenPanel rather than a second `.fileImporter`: presentation modifiers
     /// inside grouped-Form rows don't fire reliably, and fileImporter hides
     /// dotfiles — the typical pick here (`~/.zshrc`) is one.
-    private func chooseSourceFile() {
+    private func chooseSourceFile(for id: UUID) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.showsHiddenFiles = true
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-        if panel.runModal() == .OK, let url = panel.url {
-            sourceFile = (url.path as NSString).abbreviatingWithTildeInPath
+        if panel.runModal() == .OK, let url = panel.url,
+           let index = sourceFiles.firstIndex(where: { $0.id == id }) {
+            sourceFiles[index].path = (url.path as NSString).abbreviatingWithTildeInPath
         }
     }
 
@@ -279,7 +305,9 @@ struct WorkflowEditorSheet: View {
             name: trimmedName,
             group: group.trimmingCharacters(in: .whitespaces),
             workingDirectory: workingDirectory.trimmingCharacters(in: .whitespaces),
-            sourceFile: sourceFile.trimmingCharacters(in: .whitespaces),
+            sourceFiles: sourceFiles
+                .map { $0.path.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty },
             steps: steps
         )
         store.save(workflow)
