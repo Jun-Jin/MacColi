@@ -19,6 +19,11 @@ struct WorkflowsView: View {
                 grid
             }
         }
+        // Right-clicking blank panel space offers creation; tiles' own menus
+        // take precedence within their bounds.
+        .contextMenu {
+            Button("New Workflow…") { creating = true }
+        }
         .toolbar {
             ToolbarItem {
                 Button { creating = true } label: {
@@ -123,12 +128,15 @@ private struct WorkflowTile: View {
     let onDuplicate: () -> Void
     let onDelete: () -> Void
 
+    @State private var hovering = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Image(systemName: "flowchart.fill").foregroundStyle(.tint)
                 Text(workflow.name).font(.headline).lineLimit(1)
                 Spacer()
+                editButton
                 statusBadge
             }
             Text(displayDirectory)
@@ -155,6 +163,7 @@ private struct WorkflowTile: View {
         .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
         .contentShape(RoundedRectangle(cornerRadius: 10))
+        .onHover { hovering = $0 }
         .onTapGesture { onOpen() }
         .contextMenu {
             if isRunning {
@@ -169,6 +178,21 @@ private struct WorkflowTile: View {
             Divider()
             Button("Delete", role: .destructive) { onDelete() }
         }
+    }
+
+    /// Hover-only pencil in the tile header. Fades via opacity rather than
+    /// inserting/removing, so the status badge never shifts; hit testing is
+    /// gated too since an opacity-0 view still takes clicks.
+    private var editButton: some View {
+        Button { onEdit() } label: {
+            Image(systemName: "pencil")
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .help("Edit Workflow")
+        .opacity(hovering ? 1 : 0)
+        .allowsHitTesting(hovering)
+        .animation(.easeInOut(duration: 0.12), value: hovering)
     }
 
     @ViewBuilder
