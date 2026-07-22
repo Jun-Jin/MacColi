@@ -74,6 +74,10 @@ rerun it with one click — from the tile's **Run** button, or from the menu bar
   working directory, so a shared prefix like "sync main" is composed rather than
   duplicated. Circular chains are detected and refused at run time. The optional
   **group** field sections the tile grid.
+- **Creating & editing** — the toolbar ＋ or a right-click on blank panel space
+  creates a workflow; hovering a tile shows a pencil that opens the editor. A
+  tile's right-click menu has the rest: Run/Stop, Show Last Run, Edit,
+  Duplicate, and Delete (with a warning when other workflows chain to it).
 - Definitions are stored locally in `UserDefaults` (like container lists); the
   last run's result is kept per workflow for the session.
 
