@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MacColi — a native macOS app for Colima</title>
+<meta name="description" content="MacColi is a native macOS menu-bar app for Colima: a Docker Desktop-style GUI for containers, images, volumes, networks, and one-click workflows.">
+<link rel="icon" type="image/png" href="icon-256.png">
+<link rel="apple-touch-icon" href="icon-256.png">
+<meta property="og:title" content="MacColi — a native macOS app for Colima">
+<meta property="og:description" content="A Docker Desktop-style GUI for Colima. Containers, images, volumes, networks, and one-click workflows — from your menu bar.">
+<meta property="og:image" content="https://jun-jin.github.io/MacColi/icon-512.png">
+<meta property="og:url" content="https://jun-jin.github.io/MacColi/">
+<meta property="og:type" content="website">
+<style>
+  :root {
+    --accent: #d9822b;
+    --accent-strong: #b5651d;
+    --magenta: #a62e71;
+    --bg: #faf7f2;
+    --surface: #ffffff;
+    --text: #2b2620;
+    --muted: #6f675c;
+    --border: #e8e1d6;
+    --code-bg: #2b2620;
+    --code-text: #f3ede3;
+    --shadow: 0 1px 3px rgba(43, 38, 32, .08), 0 8px 24px rgba(43, 38, 32, .06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --accent: #e89a45;
+      --accent-strong: #f0ac60;
+      --magenta: #d05a9c;
+      --bg: #1c1916;
+      --surface: #26221e;
+      --text: #f0eae1;
+      --muted: #a89e90;
+      --border: #383229;
+      --code-bg: #14110e;
+      --code-text: #e8e1d6;
+      --shadow: 0 1px 3px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .3);
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent-strong); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; color: var(--text); }
+  .brand img { width: 32px; height: 32px; }
+  .brand:hover { text-decoration: none; }
+  nav { display: flex; gap: 24px; font-size: 15px; }
+  nav a { color: var(--muted); }
+  nav a:hover { color: var(--text); text-decoration: none; }
+
+  .hero { text-align: center; padding: 64px 0 72px; }
+  .hero img { width: 128px; height: 128px; }
+  .hero h1 { font-size: 48px; font-weight: 700; letter-spacing: -.02em; margin-top: 16px; }
+  .tagline {
+    font-size: 21px;
+    color: var(--muted);
+    max-width: 620px;
+    margin: 12px auto 0;
+    font-weight: 400;
+  }
+  .tagline strong { color: var(--text); font-weight: 600; }
+  .cta { display: flex; gap: 12px; justify-content: center; margin-top: 32px; flex-wrap: wrap; }
+  .btn {
+    display: inline-block;
+    padding: 12px 24px;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    transition: transform .1s ease;
+  }
+  .btn:hover { text-decoration: none; transform: translateY(-1px); }
+  .btn-primary { background: var(--accent); color: #fff; box-shadow: var(--shadow); }
+  @media (prefers-color-scheme: dark) { .btn-primary { color: #1c1916; } }
+  .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .fineprint { margin-top: 20px; font-size: 13px; color: var(--muted); }
+  .fineprint span { white-space: nowrap; }
+
+  .features { padding: 24px 0 48px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    box-shadow: var(--shadow);
+  }
+  .card h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+  .card h3::before {
+    content: "";
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--magenta);
+    margin-right: 10px;
+    vertical-align: 2px;
+  }
+  .card p { font-size: 15px; color: var(--muted); }
+  .card code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  .install { padding: 48px 0 64px; }
+  .install h2, .features h2 { font-size: 28px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 24px; text-align: center; }
+  .install-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .install-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    box-shadow: var(--shadow);
+  }
+  .install-card h3 { font-size: 17px; margin-bottom: 12px; }
+  .install-card p { font-size: 15px; color: var(--muted); margin-bottom: 16px; }
+  pre {
+    position: relative;
+    background: var(--code-bg);
+    color: var(--code-text);
+    border-radius: 10px;
+    padding: 16px 18px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13.5px;
+    line-height: 1.7;
+    overflow-x: auto;
+  }
+  .copy-btn {
+    position: absolute;
+    top: 10px; right: 10px;
+    background: rgba(255, 255, 255, .12);
+    color: var(--code-text);
+    border: none;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .copy-btn:hover { background: rgba(255, 255, 255, .22); }
+  .req { margin-top: 40px; text-align: center; font-size: 14px; color: var(--muted); max-width: 640px; margin-left: auto; margin-right: auto; }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 32px 0 48px;
+    text-align: center;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  footer .links { display: flex; gap: 24px; justify-content: center; margin-bottom: 12px; }
+
+  @media (max-width: 600px) {
+    .hero h1 { font-size: 36px; }
+    .tagline { font-size: 18px; }
+    nav { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <a class="brand" href="#"><img src="icon-256.png" alt="" width="32" height="32">MacColi</a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/Jun-Jin/MacColi">GitHub</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <img src="icon-256.png" alt="MacColi app icon" width="128" height="128">
+    <h1>MacColi</h1>
+    <p class="tagline">A native macOS app for <strong>Colima</strong> — a Docker Desktop-style GUI for containers, images, volumes, and workflows, right in your menu bar.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/Jun-Jin/MacColi/releases/latest">Download for macOS</a>
+      <a class="btn btn-secondary" href="#install">Install with Homebrew</a>
+    </div>
+    <p class="fineprint"><span>Free &amp; open source (MIT)</span> · <span>macOS 14+</span> · <span>Apple Silicon &amp; Intel</span> · <span>Signed &amp; notarized</span></p>
+  </section>
+
+  <section class="features" id="features">
+    <h2>Everything Colima, without the terminal</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>VM lifecycle &amp; settings</h3>
+        <p>Start, stop, and restart Colima with live status. Configure CPUs, memory, disk, and the runtime — docker, containerd, or incus.</p>
+      </div>
+      <div class="card">
+        <h3>Containers</h3>
+        <p>List, run, start/stop, open a shell, and watch live CPU/memory sparklines. Click a row for its logs, with an opt-in live tail.</p>
+      </div>
+      <div class="card">
+        <h3>Custom container lists</h3>
+        <p>Group containers into named lists per project, with bulk start/stop/restart. Lists survive container recreation.</p>
+      </div>
+      <div class="card">
+        <h3>Images, volumes &amp; networks</h3>
+        <p>Pull and remove images, create volumes with per-volume disk usage, manage networks — and reclaim space with one-click Clean Up.</p>
+      </div>
+      <div class="card">
+        <h3>Workflows</h3>
+        <p>Save shell-command sequences as one-click tiles with live per-step output. Chain workflows together and run them straight from the menu bar.</p>
+      </div>
+      <div class="card">
+        <h3>Native &amp; lightweight</h3>
+        <p>Swift 6 / SwiftUI, lives in the menu bar, and polling backs off when you're not looking. Press <code>⌘F</code> to filter any panel.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="install" id="install">
+    <h2>Install</h2>
+    <div class="install-cols">
+      <div class="install-card">
+        <h3>Homebrew (recommended)</h3>
+        <p>Installs the app and keeps it updated with <code>brew upgrade</code>.</p>
+<pre><button class="copy-btn" data-copy="brew tap jun-jin/maccoli&#10;brew trust jun-jin/maccoli&#10;brew install --cask maccoli">Copy</button>brew tap jun-jin/maccoli
+brew trust jun-jin/maccoli
+brew install --cask maccoli</pre>
+      </div>
+      <div class="install-card">
+        <h3>Direct download</h3>
+        <p>Grab the notarized DMG, open it, and drag MacColi into Applications. Gatekeeper opens it without warnings.</p>
+        <a class="btn btn-primary" href="https://github.com/Jun-Jin/MacColi/releases/latest">Download MacColi.dmg</a>
+      </div>
+    </div>
+    <p class="req">Requires <a href="https://github.com/abiosoft/colima">Colima</a> and the Docker CLI (<code style="font-family: ui-monospace, 'SF Mono', Menlo, monospace">brew install colima docker</code>) — or use the app's built-in “Install Colima…” button.</p>
+  </section>
+</div>
+
+<footer>
+  <div class="links">
+    <a href="https://github.com/Jun-Jin/MacColi">GitHub</a>
+    <a href="https://github.com/Jun-Jin/MacColi/blob/main/docs/RELEASE_NOTES.md">Release notes</a>
+    <a href="https://github.com/Jun-Jin/MacColi/blob/main/LICENSE">MIT License</a>
+  </div>
+  <p>MacColi is an independent open-source project. Not affiliated with Docker, Inc. or the Colima project.</p>
+</footer>
+
+<script>
+  document.querySelectorAll('.copy-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      navigator.clipboard.writeText(btn.dataset.copy).then(function () {
+        btn.textContent = 'Copied!';
+        setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+      });
+    });
+  });
+</script>
+
+</body>
+</html>
