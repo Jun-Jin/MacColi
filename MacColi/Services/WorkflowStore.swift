@@ -38,9 +38,6 @@ final class WorkflowStore {
     @ObservationIgnored private let runner = ProcessRunner()
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private static let storageKey = "workflows"
-    /// Per-step output cap (bytes-ish). A runaway step — e.g. a `--follow` log
-    /// left running — trims from the front instead of growing without bound.
-    @ObservationIgnored private static let outputCap = 200_000
 
     init() {
         if let data = defaults.data(forKey: Self.storageKey),
@@ -198,6 +195,29 @@ final class WorkflowStore {
             }
 
             runs[id]?.steps[index].phase = .running
+
+            // Lines land in the buffer straight from the stream thread — no
+            // main-actor hop, no observable mutation per line. The flush loop
+            // repaints the step's output at ~7 Hz, so a chatty step can't
+            // drown the UI in per-line invalidations.
+            let buffer = LogBuffer()
+            let flush = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    if let joined = buffer.drainIfChanged() {
+                        self?.setOutput(joined, id: id, step: index)
+                    }
+                    try? await Task.sleep(for: .milliseconds(150))
+                }
+            }
+            // Unstructured tasks don't inherit cancellation, so every exit
+            // below must run this: stop the loop and land the buffered tail.
+            func finishStreaming() {
+                flush.cancel()
+                if let joined = buffer.drainIfChanged() {
+                    setOutput(joined, id: id, step: index)
+                }
+            }
+
             do {
                 // `-l` sources login profiles so user-managed env (nvm, asdf,
                 // exported variables a Makefile expects, …) is in place.
@@ -208,9 +228,10 @@ final class WorkflowStore {
                     onStart: { [weak self] pid in
                         Task { @MainActor in self?.runs[id]?.steps[index].pid = pid }
                     }
-                ) { [weak self] line in
-                    Task { @MainActor in self?.append(line, to: id, step: index) }
+                ) { line in
+                    buffer.append(line)
                 }
+                finishStreaming()
                 if Task.isCancelled {
                     runs[id]?.steps[index].phase = .cancelled
                     skipRemaining(id, from: index + 1)
@@ -224,10 +245,12 @@ final class WorkflowStore {
                     break
                 }
             } catch is CancellationError {
+                finishStreaming()
                 runs[id]?.steps[index].phase = .cancelled
                 skipRemaining(id, from: index + 1)
                 break
             } catch {
+                finishStreaming()
                 runs[id]?.steps[index].phase = .failed(error.localizedDescription)
                 skipRemaining(id, from: index + 1)
                 break
@@ -245,12 +268,11 @@ final class WorkflowStore {
         }
     }
 
-    private func append(_ line: String, to id: UUID, step index: Int) {
+    /// Replaces a step's visible output with the buffer's latest joined text.
+    /// The buffer caps by line count, so no byte accounting is needed here.
+    private func setOutput(_ joined: String, id: UUID, step index: Int) {
         guard runs[id]?.steps.indices.contains(index) == true else { return }
-        runs[id]?.steps[index].output.append(line + "\n")
-        if let output = runs[id]?.steps[index].output, output.utf8.count > Self.outputCap {
-            runs[id]?.steps[index].output = String(output.suffix(Self.outputCap / 2))
-        }
+        runs[id]?.steps[index].output = joined
     }
 
     /// Wraps a string in single quotes for safe embedding in a zsh command.

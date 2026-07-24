@@ -90,8 +90,10 @@ struct WorkflowRunSheet: View {
     }
 
     /// Cheap change token for auto-scroll: total output length across steps.
+    /// `utf8.count` is O(1) on native strings; `count` would grapheme-scan
+    /// every step's output on each evaluation.
     private var outputFingerprint: Int {
-        run?.steps.reduce(0) { $0 + $1.output.count } ?? 0
+        run?.steps.reduce(0) { $0 + $1.output.utf8.count } ?? 0
     }
 
     private func stepView(_ step: WorkflowRunStep) -> some View {
