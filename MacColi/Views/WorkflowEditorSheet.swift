@@ -27,6 +27,7 @@ struct WorkflowEditorSheet: View {
     @State private var group: String
     @State private var workingDirectory: String
     @State private var sourceFiles: [SourceFileEntry]
+    @State private var discardsOutput: Bool
     @State private var steps: [WorkflowStep]
     @State private var pickingDirectory = false
     /// Shell steps showing the expanded script area instead of the one-line
@@ -43,12 +44,14 @@ struct WorkflowEditorSheet: View {
             _group = State(initialValue: "")
             _workingDirectory = State(initialValue: "~")
             _sourceFiles = State(initialValue: [])
+            _discardsOutput = State(initialValue: false)
             initialSteps = [WorkflowStep(action: .shell(command: ""))]
         case .edit(let workflow):
             _name = State(initialValue: workflow.name)
             _group = State(initialValue: workflow.group)
             _workingDirectory = State(initialValue: workflow.workingDirectory)
             _sourceFiles = State(initialValue: workflow.sourceFiles.map { SourceFileEntry(path: $0) })
+            _discardsOutput = State(initialValue: workflow.discardsOutput)
             initialSteps = workflow.steps
         }
         _steps = State(initialValue: initialSteps)
@@ -151,6 +154,14 @@ struct WorkflowEditorSheet: View {
                     Text("Steps")
                 } footer: {
                     Text("Steps run in order with zsh in the working directory; the run stops at the first failing step. A chained workflow's steps run in its own working directory, with its own source files.")
+                }
+
+                Section {
+                    Toggle("Discard Output", isOn: $discardsOutput)
+                } header: {
+                    Text("Output")
+                } footer: {
+                    Text("Drops everything the steps print instead of keeping it in the run detail. Success and failure are still reported — but a failing step shows only its exit code. Redirecting in the command itself is not enough: stdout and stderr share one stream here.")
                 }
             }
             .formStyle(.grouped)
@@ -308,6 +319,7 @@ struct WorkflowEditorSheet: View {
             sourceFiles: sourceFiles
                 .map { $0.path.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty },
+            discardsOutput: discardsOutput,
             steps: steps
         )
         store.save(workflow)

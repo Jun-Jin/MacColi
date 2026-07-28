@@ -47,16 +47,22 @@ struct Workflow: Identifiable, Codable, Hashable {
     /// before each shell step so functions, aliases, and variables defined
     /// there are available. `~` is expanded in each.
     var sourceFiles: [String]
+    /// Drop this workflow's step output instead of keeping it. Shell redirection
+    /// is an awkward substitute: the runner merges stdout and stderr into one
+    /// pipe, so `> /dev/null` alone still leaks half the noise. Set here, the
+    /// output is never accumulated at all.
+    var discardsOutput: Bool
     var steps: [WorkflowStep]
 
     init(id: UUID = UUID(), name: String = "", group: String = "",
          workingDirectory: String = "~", sourceFiles: [String] = [],
-         steps: [WorkflowStep] = []) {
+         discardsOutput: Bool = false, steps: [WorkflowStep] = []) {
         self.id = id
         self.name = name
         self.group = group
         self.workingDirectory = workingDirectory
         self.sourceFiles = sourceFiles
+        self.discardsOutput = discardsOutput
         self.steps = steps
     }
 
@@ -79,6 +85,7 @@ struct Workflow: Identifiable, Codable, Hashable {
             let single = try legacy.decodeIfPresent(String.self, forKey: .sourceFile) ?? ""
             sourceFiles = single.isEmpty ? [] : [single]
         }
+        discardsOutput = try container.decodeIfPresent(Bool.self, forKey: .discardsOutput) ?? false
         steps = try container.decode([WorkflowStep].self, forKey: .steps)
     }
 }
@@ -106,6 +113,9 @@ struct WorkflowRunStep: Identifiable, Equatable {
     /// The owning workflow's source files (empty when none) — like
     /// `workingDirectory`, a chained step keeps its own workflow's values.
     var sourceFiles: [String] = []
+    /// The owning workflow's `discardsOutput`, so a chained workflow marked
+    /// quiet stays quiet no matter which workflow pulls it in.
+    var discardsOutput: Bool = false
     var phase: Phase = .pending
     var output: String = ""
     /// PID of the step's `zsh` process, set once it launches. Children the step

@@ -126,13 +126,22 @@ struct WorkflowRunSheet: View {
             }
             .buttonStyle(.plain)
 
-            if expanded.contains(step.id), !step.output.isEmpty {
-                Text(step.output)
-                    .font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+            if expanded.contains(step.id) {
+                if !step.output.isEmpty {
+                    Text(step.output)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                } else if step.discardsOutput {
+                    // Without this an expanded quiet step reads as "the command
+                    // printed nothing", which is a different problem.
+                    Label("Output discarded for this workflow.", systemImage: "eye.slash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 2)
+                }
             }
         }
     }

@@ -136,7 +136,8 @@ final class WorkflowStore {
                 result.append(WorkflowRunStep(title: titlePrefix + WorkflowStep.summary(of: trimmed),
                                               command: trimmed,
                                               workingDirectory: workflow.workingDirectory,
-                                              sourceFiles: workflow.sourceFiles))
+                                              sourceFiles: workflow.sourceFiles,
+                                              discardsOutput: workflow.discardsOutput))
             case .runWorkflow(let subID):
                 guard let sub = self.workflow(subID) else { throw WorkflowError.missingReference }
                 guard subID != workflow.id, !path.contains(subID) else {
@@ -200,20 +201,26 @@ final class WorkflowStore {
             // main-actor hop, no observable mutation per line. The flush loop
             // repaints the step's output at ~7 Hz, so a chatty step can't
             // drown the UI in per-line invalidations.
-            let buffer = LogBuffer()
-            let flush = Task { @MainActor [weak self] in
-                while !Task.isCancelled {
-                    if let joined = buffer.drainIfChanged() {
-                        self?.setOutput(joined, id: id, step: index)
+            //
+            // A discard-output step gets neither: no buffer, no flush loop, so
+            // its lines are dropped as they arrive. The runner still drains the
+            // pipe — a subprocess would block once a full one stops being read.
+            let buffer: LogBuffer? = step.discardsOutput ? nil : LogBuffer()
+            let flush: Task<Void, Never>? = buffer.map { buffer in
+                Task { @MainActor [weak self] in
+                    while !Task.isCancelled {
+                        if let joined = buffer.drainIfChanged() {
+                            self?.setOutput(joined, id: id, step: index)
+                        }
+                        try? await Task.sleep(for: .milliseconds(150))
                     }
-                    try? await Task.sleep(for: .milliseconds(150))
                 }
             }
             // Unstructured tasks don't inherit cancellation, so every exit
             // below must run this: stop the loop and land the buffered tail.
             func finishStreaming() {
-                flush.cancel()
-                if let joined = buffer.drainIfChanged() {
+                flush?.cancel()
+                if let joined = buffer?.drainIfChanged() {
                     setOutput(joined, id: id, step: index)
                 }
             }
@@ -229,7 +236,7 @@ final class WorkflowStore {
                         Task { @MainActor in self?.runs[id]?.steps[index].pid = pid }
                     }
                 ) { line in
-                    buffer.append(line)
+                    buffer?.append(line)
                 }
                 finishStreaming()
                 if Task.isCancelled {
