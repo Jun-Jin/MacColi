@@ -211,6 +211,7 @@ struct WorkflowEditorSheet: View {
                 }
                 .labelsHidden()
                 Spacer()
+                moveButtons(step.wrappedValue.id)
                 removeButton { steps.removeAll { $0.id == step.wrappedValue.id } }
             }
         }
@@ -224,6 +225,7 @@ struct WorkflowEditorSheet: View {
                 .lineLimit(1...4)
                 .font(.body.monospaced())
                 .autocorrectionDisabled()
+            moveButtons(step.wrappedValue.id)
             expandButton(step.wrappedValue.id, expand: true)
             removeButton { steps.removeAll { $0.id == step.wrappedValue.id } }
         }
@@ -237,6 +239,7 @@ struct WorkflowEditorSheet: View {
                 Image(systemName: "terminal").foregroundStyle(.secondary)
                 Text("Script").font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                moveButtons(step.wrappedValue.id)
                 expandButton(step.wrappedValue.id, expand: false)
                 removeButton { steps.removeAll { $0.id == step.wrappedValue.id } }
             }
@@ -263,6 +266,29 @@ struct WorkflowEditorSheet: View {
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
         .help(expand ? "Expand to script area" : "Collapse to one line")
+    }
+
+    /// Explicit reorder controls: `.onMove` drag stays available, but grouped-Form
+    /// rows are covered by text fields and buttons, so a drag rarely lands — these
+    /// are the reliable way to reorder. Disabled at the list boundaries.
+    private func moveButtons(_ id: UUID) -> some View {
+        let index = steps.firstIndex { $0.id == id }
+        return HStack(spacing: 2) {
+            Button { moveStep(id, by: -1) } label: { Image(systemName: "chevron.up") }
+                .disabled(index == 0)
+                .help("Move step up")
+            Button { moveStep(id, by: 1) } label: { Image(systemName: "chevron.down") }
+                .disabled(index == steps.count - 1)
+                .help("Move step down")
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+    }
+
+    private func moveStep(_ id: UUID, by offset: Int) {
+        guard let index = steps.firstIndex(where: { $0.id == id }),
+              steps.indices.contains(index + offset) else { return }
+        withAnimation { steps.swapAt(index, index + offset) }
     }
 
     private func removeButton(_ action: @escaping () -> Void) -> some View {
