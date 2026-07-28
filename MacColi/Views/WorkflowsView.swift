@@ -135,6 +135,9 @@ private struct WorkflowTile: View {
             HStack(spacing: 8) {
                 Image(systemName: "flowchart.fill").foregroundStyle(.tint)
                 Text(workflow.name).font(.headline).lineLimit(1)
+                if workflow.discardsOutput {
+                    DiscardedOutputIcon()
+                }
                 Spacer()
                 editButton
                 statusBadge

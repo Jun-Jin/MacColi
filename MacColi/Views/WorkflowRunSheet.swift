@@ -72,6 +72,9 @@ struct WorkflowRunSheet: View {
                                     .font(.callout.monospaced())
                                     .lineLimit(1)
                                     .truncationMode(.middle)
+                                if previewDiscardsOutput(step) {
+                                    DiscardedOutputIcon()
+                                }
                             }
                         }
                     }
@@ -111,6 +114,11 @@ struct WorkflowRunSheet: View {
                         .font(.callout.monospaced())
                         .lineLimit(1)
                         .truncationMode(.middle)
+                    // A failing discard step keeps its captured tail, so the
+                    // icon appears only while the output really is dropped.
+                    if step.discardsOutput && step.output.isEmpty {
+                        DiscardedOutputIcon()
+                    }
                     Spacer()
                     if case .failed(let message) = step.phase {
                         Text(message)
@@ -212,6 +220,18 @@ struct WorkflowRunSheet: View {
             return WorkflowStep.summary(of: command)
         case .runWorkflow(let id):
             return "Run “\(store.workflow(id)?.name ?? "missing workflow")”"
+        }
+    }
+
+    /// Mirrors flatten's semantics: a chained workflow's own flag governs its
+    /// steps, so a preview row for a `runWorkflow` step reads the referenced
+    /// workflow, not the one being previewed.
+    private func previewDiscardsOutput(_ step: WorkflowStep) -> Bool {
+        switch step.action {
+        case .shell:
+            return workflow?.discardsOutput ?? false
+        case .runWorkflow(let id):
+            return store.workflow(id)?.discardsOutput ?? false
         }
     }
 
