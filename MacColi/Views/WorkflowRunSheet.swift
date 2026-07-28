@@ -128,6 +128,15 @@ struct WorkflowRunSheet: View {
 
             if expanded.contains(step.id) {
                 if !step.output.isEmpty {
+                    if step.discardsOutput {
+                        // Output here means the step failed and its tail was
+                        // kept; say so, or the discard toggle looks ignored.
+                        Label("Output discarded — showing up to the last \(WorkflowStore.discardedTailLines) lines because the step failed.",
+                              systemImage: "eye.slash")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 2)
+                    }
                     Text(step.output)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)

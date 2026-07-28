@@ -50,7 +50,8 @@ struct Workflow: Identifiable, Codable, Hashable {
     /// Drop this workflow's step output instead of keeping it. Shell redirection
     /// is an awkward substitute: the runner merges stdout and stderr into one
     /// pipe, so `> /dev/null` alone still leaks half the noise. Set here, the
-    /// output is never accumulated at all.
+    /// run detail stays clear of output — except for a failing step, whose
+    /// captured tail is surfaced so the failure can be debugged.
     var discardsOutput: Bool
     var steps: [WorkflowStep]
 

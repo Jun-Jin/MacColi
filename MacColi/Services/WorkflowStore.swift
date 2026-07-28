@@ -39,6 +39,12 @@ final class WorkflowStore {
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private static let storageKey = "workflows"
 
+    /// Ring size for a discard-output step's capture: the tail kept in case the
+    /// step fails. Deliberately smaller than the 5,000-line streaming buffer —
+    /// it exists only for failure debugging. The run sheet quotes this number
+    /// when labelling a surfaced tail.
+    static let discardedTailLines = 512
+
     init() {
         if let data = defaults.data(forKey: Self.storageKey),
            let decoded = try? JSONDecoder().decode([Workflow].self, from: data) {
@@ -202,12 +208,14 @@ final class WorkflowStore {
             // repaints the step's output at ~7 Hz, so a chatty step can't
             // drown the UI in per-line invalidations.
             //
-            // A discard-output step gets neither: no buffer, no flush loop, so
-            // its lines are dropped as they arrive. The runner still drains the
-            // pipe — a subprocess would block once a full one stops being read.
-            let buffer: LogBuffer? = step.discardsOutput ? nil : LogBuffer()
-            let flush: Task<Void, Never>? = buffer.map { buffer in
-                Task { @MainActor [weak self] in
+            // A discard-output step skips only the flush loop, so nothing
+            // streams to the run detail. Lines still land in the buffer — a
+            // tight ring of the last `discardedTailLines` — because a failing
+            // step surfaces its captured tail for debugging; success drops it.
+            let buffer = step.discardsOutput
+                ? LogBuffer(maxLines: Self.discardedTailLines) : LogBuffer()
+            let flush: Task<Void, Never>? = step.discardsOutput ? nil
+                : Task { @MainActor [weak self] in
                     while !Task.isCancelled {
                         if let joined = buffer.drainIfChanged() {
                             self?.setOutput(joined, id: id, step: index)
@@ -215,12 +223,19 @@ final class WorkflowStore {
                         try? await Task.sleep(for: .milliseconds(150))
                     }
                 }
-            }
             // Unstructured tasks don't inherit cancellation, so every exit
             // below must run this: stop the loop and land the buffered tail.
-            func finishStreaming() {
+            // A quiet step lands its tail only when it failed — the one case
+            // where the output earns its place in the run detail.
+            func finishStreaming(failed: Bool) {
                 flush?.cancel()
-                if let joined = buffer?.drainIfChanged() {
+                if step.discardsOutput {
+                    // `tail()`, not `drainIfChanged()`: the ring drifts above
+                    // its cap between trims, and the run sheet promises "up to
+                    // the last N lines" — surface exactly that.
+                    guard failed, let tail = buffer.tail() else { return }
+                    setOutput(tail, id: id, step: index)
+                } else if let joined = buffer.drainIfChanged() {
                     setOutput(joined, id: id, step: index)
                 }
             }
@@ -236,9 +251,9 @@ final class WorkflowStore {
                         Task { @MainActor in self?.runs[id]?.steps[index].pid = pid }
                     }
                 ) { line in
-                    buffer?.append(line)
+                    buffer.append(line)
                 }
-                finishStreaming()
+                finishStreaming(failed: code != 0 && !Task.isCancelled)
                 if Task.isCancelled {
                     runs[id]?.steps[index].phase = .cancelled
                     skipRemaining(id, from: index + 1)
@@ -252,12 +267,12 @@ final class WorkflowStore {
                     break
                 }
             } catch is CancellationError {
-                finishStreaming()
+                finishStreaming(failed: false)
                 runs[id]?.steps[index].phase = .cancelled
                 skipRemaining(id, from: index + 1)
                 break
             } catch {
-                finishStreaming()
+                finishStreaming(failed: true)
                 runs[id]?.steps[index].phase = .failed(error.localizedDescription)
                 skipRemaining(id, from: index + 1)
                 break

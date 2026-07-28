@@ -161,7 +161,7 @@ struct WorkflowEditorSheet: View {
                 } header: {
                     Text("Output")
                 } footer: {
-                    Text("Drops everything the steps print instead of keeping it in the run detail. Success and failure are still reported — but a failing step shows only its exit code. Redirecting in the command itself is not enough: stdout and stderr share one stream here.")
+                    Text("Drops everything the steps print instead of keeping it in the run detail. A failing step is the exception: its output is kept so the failure can be debugged. Redirecting in the command itself is not enough: stdout and stderr share one stream here.")
                 }
             }
             .formStyle(.grouped)

@@ -38,4 +38,15 @@ final class LogBuffer: @unchecked Sendable {
             return lines.joined(separator: "\n")
         }
     }
+
+    /// The last `maxLines` lines as joined text, or nil when nothing was
+    /// captured. Unlike `drainIfChanged`, this is exact: the ring itself drifts
+    /// up to `slack` above `maxLines` between trims, and callers surfacing a
+    /// bounded tail (a failing discard-output step) shouldn't expose the drift.
+    func tail() -> String? {
+        lock.withLock {
+            guard !lines.isEmpty else { return nil }
+            return lines.suffix(maxLines).joined(separator: "\n")
+        }
+    }
 }
