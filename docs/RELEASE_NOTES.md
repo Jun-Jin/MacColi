@@ -4,6 +4,14 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.6.3
+
+- ↕️ **Reorder workflow steps** — every step row in the workflow editor has
+  up/down buttons that swap it with its neighbor (disabled at the ends), so
+  existing steps can be rearranged without re-typing them. Drag reordering
+  rarely landed because the rows are covered by text fields; the buttons are
+  the reliable way.
+
 ## v0.6.2
 
 - 🙈 **Discard workflow output** — a per-workflow toggle drops step output
