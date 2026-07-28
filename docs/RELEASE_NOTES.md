@@ -4,6 +4,19 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.6.2
+
+- 🙈 **Discard workflow output** — a per-workflow toggle drops step output
+  instead of keeping it, for noisy routine workflows whose logs are never
+  read. A failing step still keeps its tail (up to the last 512 lines) so the
+  failure can be debugged, and an eye-slash marker on the workflow tile and
+  the run sheet's step rows shows where output is being dropped. Chained
+  workflows keep their own setting.
+- ⚡ Step output rendering is decoupled from log rate — a chatty step repaints
+  the run sheet at a steady rate instead of once per line, keeping the UI
+  responsive under fast output.
+- 🌐 A landing page for the project, published via GitHub Pages.
+
 ## v0.6.1
 
 - 📦 **Workflow source files** — a workflow can list files (`~/.zshrc`, a
