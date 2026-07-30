@@ -32,6 +32,13 @@ final class UpdateChecker {
     private static let latestAPI =
         URL(string: "https://api.github.com/repos/Jun-Jin/MacColi/releases/latest")!
 
+    /// Quiet launch checks run at most once per day. Every check costs one of
+    /// the unauthenticated GitHub API's 60 requests/hour/IP, and rapid app
+    /// relaunches (a dev loop) can drain that budget until checks 403.
+    /// Stored on successful fetches only, so an offline launch retries next time.
+    private static let lastCheckKey = "updateCheck.lastSuccess"
+    private static let quietInterval: TimeInterval = 24 * 60 * 60
+
     var currentVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
     }
@@ -46,11 +53,17 @@ final class UpdateChecker {
         case .checking, .upgrading, .relaunchReady: return
         default: break
         }
+        if !userInitiated,
+           let last = UserDefaults.standard.object(forKey: Self.lastCheckKey) as? Date,
+           Date().timeIntervalSince(last) < Self.quietInterval {
+            return
+        }
         phase = .checking
         do {
             async let brewInstall = Self.detectBrewInstall()
             let latest = try await Self.fetchLatestVersion()
             isBrewInstall = await brewInstall
+            UserDefaults.standard.set(Date(), forKey: Self.lastCheckKey)
             phase = Self.isNewer(latest, than: currentVersion)
                 ? .available(version: latest)
                 : .upToDate
