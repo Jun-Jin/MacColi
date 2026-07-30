@@ -9,6 +9,9 @@ struct MacColiApp: App {
     // Saved workflows and their runs, separate from AppState: workflows don't
     // depend on the Colima lifecycle and their runs outlive panel switches.
     @State private var workflowStore = WorkflowStore()
+    // App-owned for the same reason: a `brew upgrade` started from Settings
+    // must keep running when the panel is switched away.
+    @State private var updateChecker = UpdateChecker()
 
     // Brings a bare `swift run` build to the front (see AppDelegate). No-op for
     // the shipped .app, which LaunchServices already activates.
@@ -20,8 +23,14 @@ struct MacColiApp: App {
             DashboardView()
                 .environment(state)
                 .environment(workflowStore)
+                .environment(updateChecker)
                 .frame(minWidth: 820, minHeight: 520)
-                .task { state.startPolling() }
+                .task {
+                    state.startPolling()
+                    // Quiet launch check: surfaces in Settings only when a new
+                    // version exists; failures (offline, …) stay silent.
+                    await updateChecker.check(userInitiated: false)
+                }
         }
         .windowToolbarStyle(.unified)
         .commands {

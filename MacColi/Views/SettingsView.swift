@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(AppState.self) private var state
+    @Environment(UpdateChecker.self) private var updater
     @State private var confirmDelete = false
     @State private var importingCert = false
 
@@ -113,6 +114,59 @@ struct SettingsView: View {
                     Button("Reload from colima.yaml") { state.reloadConfigFromVM() }
                         .disabled(state.colimaState == .notInstalled || state.isBusy)
                     Spacer()
+                }
+            }
+
+            Section("Updates") {
+                HStack {
+                    Button("Check for Updates") {
+                        Task { await updater.check() }
+                    }
+                    .disabled(updater.phase == .checking || updater.phase == .upgrading)
+                    if updater.phase == .checking {
+                        ProgressView().controlSize(.small)
+                    }
+                    Spacer()
+                    Text("Version \(updater.currentVersion)")
+                        .foregroundStyle(.secondary)
+                }
+                switch updater.phase {
+                case .upToDate:
+                    Text("MacColi is up to date.")
+                        .font(.caption).foregroundStyle(.secondary)
+                case .available(let version):
+                    HStack {
+                        Text("Version \(version) is available.")
+                        Spacer()
+                        if updater.isBrewInstall {
+                            Button("Update via Homebrew") {
+                                Task { await updater.upgrade() }
+                            }
+                        } else {
+                            // No cask entry to upgrade — the user installed the
+                            // DMG by hand, so hand them the download instead.
+                            Link("Open Releases Page", destination: UpdateChecker.releasesPage)
+                        }
+                    }
+                case .upgrading:
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text(updater.upgradeStatusLine.isEmpty
+                             ? "Running brew upgrade…" : updater.upgradeStatusLine)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                case .relaunchReady:
+                    HStack {
+                        Text("Update installed. Relaunch to start using it.")
+                        Spacer()
+                        Button("Relaunch MacColi") { updater.relaunch() }
+                    }
+                case .failed(let message):
+                    Text(message)
+                        .font(.caption).foregroundStyle(.red)
+                case .idle, .checking:
+                    EmptyView()
                 }
             }
 
