@@ -29,13 +29,11 @@ final class UpdateChecker {
     private(set) var upgradeStatusLine = ""
 
     static let releasesPage = URL(string: "https://github.com/Jun-Jin/MacColi/releases/latest")!
-    private static let latestAPI =
-        URL(string: "https://api.github.com/repos/Jun-Jin/MacColi/releases/latest")!
 
-    /// Quiet launch checks run at most once per day. Every check costs one of
-    /// the unauthenticated GitHub API's 60 requests/hour/IP, and rapid app
-    /// relaunches (a dev loop) can drain that budget until checks 403.
-    /// Stored on successful fetches only, so an offline launch retries next time.
+    /// Quiet launch checks run at most once per day — the fetch avoids the
+    /// rate-limited API, but there's still no reason to hit GitHub on every
+    /// dev-loop relaunch. Stored on successful fetches only, so an offline
+    /// launch retries next time.
     private static let lastCheckKey = "updateCheck.lastSuccess"
     private static let quietInterval: TimeInterval = 24 * 60 * 60
 
@@ -112,19 +110,44 @@ final class UpdateChecker {
         return result.succeeded
     }
 
+    /// Reads the latest version from the releases page's redirect instead of
+    /// the REST API: `/releases/latest` answers 3xx with a Location of
+    /// `/releases/tag/vX.Y.Z`. The web endpoint is not subject to the API's
+    /// 60 unauthenticated requests/hour/IP, which dev-loop relaunches used to
+    /// drain until checks 403ed.
     private static func fetchLatestVersion() async throws -> String {
-        var request = URLRequest(url: latestAPI)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        let (_, response) = try await URLSession.shared.data(
+            for: URLRequest(url: releasesPage), delegate: RedirectStopper())
+        guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
         }
-        struct Release: Decodable {
-            let tagName: String
-            enum CodingKeys: String, CodingKey { case tagName = "tag_name" }
+        guard (300..<400).contains(http.statusCode),
+              let location = http.value(forHTTPHeaderField: "Location"),
+              let tag = URL(string: location, relativeTo: releasesPage)
+                  .map({ $0.lastPathComponent }),
+              !tag.isEmpty
+        else {
+            throw HTTPStatusError(status: http.statusCode)
         }
-        let tag = try JSONDecoder().decode(Release.self, from: data).tagName
         return tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+    }
+
+    /// A response that wasn't the expected release redirect. Carries the status
+    /// so the Settings error line says what GitHub actually answered.
+    private struct HTTPStatusError: LocalizedError {
+        let status: Int
+        var errorDescription: String? { "GitHub answered HTTP \(status)." }
+    }
+
+    /// Stops URLSession from following the releases-page redirect, so the 3xx
+    /// response — whose Location header carries the version tag — is returned
+    /// as-is instead of the page it points to.
+    private final class RedirectStopper: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask,
+                        willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest) async -> URLRequest? {
+            nil
+        }
     }
 
     /// Numeric per-component comparison, so "0.10.0" beats "0.9.1" where a
