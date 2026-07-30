@@ -119,9 +119,10 @@ struct WorkflowRunStep: Identifiable, Equatable {
     var discardsOutput: Bool = false
     var phase: Phase = .pending
     var output: String = ""
-    /// PID of the step's `zsh` process, set once it launches. Children the step
-    /// spawns have their own PIDs (`pgrep -P <pid>`). Kept after exit; the UI
-    /// shows it only while the step is running.
+    /// PID of the run's `zsh` session, set once the step starts. Every step of
+    /// a run shares it; the commands a step spawns have their own PIDs
+    /// (`pgrep -P <pid>`). Kept after exit; the UI shows it only while the
+    /// step is running.
     var pid: Int32?
 }
 

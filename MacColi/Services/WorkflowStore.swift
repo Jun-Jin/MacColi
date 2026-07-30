@@ -23,10 +23,12 @@ enum WorkflowError: LocalizedError {
 /// Owns the saved workflows and their runs.
 ///
 /// Persistence mirrors AppState's container lists: JSON in UserDefaults, written
-/// through by every mutator. Runs execute each flattened step as `zsh -lc` in
-/// the step's working directory, with the same augmented PATH / COLIMA_HOME /
-/// DOCKER_HOST environment the rest of the app uses — so `git`, `make`, and
-/// `docker` behave exactly as they do in the user's terminal.
+/// through by every mutator. A run feeds all of its flattened steps through one
+/// `zsh` login session (see ShellSession), started in the first step's working
+/// directory with the same augmented PATH / COLIMA_HOME / DOCKER_HOST
+/// environment the rest of the app uses — so `git`, `make`, and `docker` behave
+/// exactly as they do in the user's terminal, and shell state a step sets up
+/// carries into the steps after it.
 @Observable
 @MainActor
 final class WorkflowStore {
@@ -35,7 +37,6 @@ final class WorkflowStore {
     private(set) var runs: [UUID: WorkflowRunState] = [:]
 
     @ObservationIgnored private let defaults = UserDefaults.standard
-    @ObservationIgnored private let runner = ProcessRunner()
     @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private static let storageKey = "workflows"
 
@@ -156,10 +157,22 @@ final class WorkflowStore {
         return result
     }
 
-    /// Runs the flattened steps sequentially, stopping at the first failure.
+    /// Runs the flattened steps sequentially through one shell session,
+    /// stopping at the first failure.
     private func execute(_ id: UUID) async {
         let environment = CLI.shared.dockerEnvironment()
         let count = runs[id]?.steps.count ?? 0
+
+        // Started at the first step that gets far enough to run, so a run that
+        // fails its directory check never spawns a shell at all.
+        var session: ShellSession?
+        // What the session was last *told* to cd to and source. Both are
+        // re-emitted only when the step's configured values change, so a `cd`
+        // a step performs itself survives into the next step of the same
+        // workflow, while crossing into a chained workflow that declares a
+        // different directory still resets to it.
+        var currentDirectory: String?
+        var currentSourceFiles: [String]?
 
         for index in 0..<count {
             guard let step = runs[id]?.steps[index] else { break }
@@ -179,28 +192,57 @@ final class WorkflowStore {
                 break
             }
 
-            var command = step.command
             let sourceFiles = step.sourceFiles
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }
-            if !sourceFiles.isEmpty {
-                if let missing = sourceFiles.first(where: {
-                    !FileManager.default.fileExists(atPath: Self.expandPath($0))
-                }) {
+            if let missing = sourceFiles.first(where: {
+                !FileManager.default.fileExists(atPath: Self.expandPath($0))
+            }) {
+                runs[id]?.steps[index].phase =
+                    .failed("Source file “\(missing)” was not found.")
+                skipRemaining(id, from: index + 1)
+                break
+            }
+
+            if session == nil {
+                do {
+                    session = try ShellSession(environment: environment,
+                                               currentDirectory: directory)
+                    // The shell starts there, so this step needs no `cd`.
+                    currentDirectory = step.workingDirectory
+                } catch {
                     runs[id]?.steps[index].phase =
-                        .failed("Source file “\(missing)” was not found.")
+                        .failed("Could not start a shell: \(error.localizedDescription)")
                     skipRemaining(id, from: index + 1)
                     break
                 }
-                // The step body must go through `eval`: zsh parses the whole
-                // `-c` string before `source` runs, and alias expansion happens
-                // at parse time — without the re-parse, sourced functions would
-                // work but sourced aliases would not.
-                command = (sourceFiles.map { "source \(Self.shellQuoted(Self.expandPath($0)))" }
-                    + ["eval \(Self.shellQuoted(step.command))"])
-                    .joined(separator: "\n")
             }
+            guard let session else { break }
 
+            // Every line below is redirected away from the session's stdin:
+            // that is the channel the steps behind this one are queued on, and
+            // a step running `cat` would otherwise swallow them.
+            var script: [String] = []
+            if step.workingDirectory != currentDirectory {
+                // Existence was just checked, so a failure here would take a
+                // race to produce; the shell reports it and the step's own
+                // status still decides the outcome.
+                script.append("cd \(Self.shellQuoted(directory)) < /dev/null")
+            }
+            if sourceFiles != currentSourceFiles {
+                script += sourceFiles.map {
+                    "source \(Self.shellQuoted(Self.expandPath($0))) < /dev/null"
+                }
+            }
+            // The step body must go through `eval`: zsh parses a whole command
+            // before running it, and alias expansion happens at parse time —
+            // without the re-parse, sourced functions would work but sourced
+            // aliases would not.
+            script.append("eval \(Self.shellQuoted(step.command)) < /dev/null")
+            currentDirectory = step.workingDirectory
+            currentSourceFiles = sourceFiles
+
+            runs[id]?.steps[index].pid = session.pid
             runs[id]?.steps[index].phase = .running
 
             // Lines land in the buffer straight from the stream thread — no
@@ -241,16 +283,7 @@ final class WorkflowStore {
             }
 
             do {
-                // `-l` sources login profiles so user-managed env (nvm, asdf,
-                // exported variables a Makefile expects, …) is in place.
-                let code = try await runner.runStreaming(
-                    "/bin/zsh", ["-lc", command],
-                    environment: environment,
-                    currentDirectory: directory,
-                    onStart: { [weak self] pid in
-                        Task { @MainActor in self?.runs[id]?.steps[index].pid = pid }
-                    }
-                ) { line in
+                let code = try await session.run(script.joined(separator: "\n")) { line in
                     buffer.append(line)
                 }
                 finishStreaming(failed: code != 0 && !Task.isCancelled)
@@ -279,6 +312,7 @@ final class WorkflowStore {
             }
         }
 
+        await session?.close()
         runs[id]?.finishedAt = Date()
         tasks[id] = nil
     }
