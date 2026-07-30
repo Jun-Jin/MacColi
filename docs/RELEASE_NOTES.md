@@ -4,6 +4,28 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.6.5
+
+- 🚦 **Update check no longer trips GitHub's rate limit** — the latest version
+  is read from the releases page's redirect instead of the REST API, whose
+  60-requests/hour cap for unauthenticated clients could turn checks into an
+  opaque "bad server response" error. Quiet launch checks also run at most
+  once per day; manual checks in Settings are never throttled, and an
+  unexpected response now reports the actual HTTP status.
+
+## v0.6.4
+
+- 🐚 **Workflow steps share one shell** — a run feeds all its steps through a
+  single long-lived `zsh` login shell, so state a step sets — a variable, an
+  `export`, a function, a `cd` — is still there for the next step:
+  `RESULT=$(…)` in one step reads back as `$RESULT` in the next. Steps
+  previously ran as independent `zsh -lc` processes that forgot everything
+  between steps.
+- 🔄 **Update check in Settings** — compares the running version against the
+  latest GitHub release, with a quiet check at launch. Homebrew installs
+  upgrade in place (`brew upgrade --cask maccoli`) with a one-click relaunch
+  into the new version; other installs are pointed at the releases page.
+
 ## v0.6.3
 
 - ↕️ **Reorder workflow steps** — every step row in the workflow editor has
