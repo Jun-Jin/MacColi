@@ -4,6 +4,17 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.6.6
+
+- ⌨️ **⇧⌘P command palette** — press ⇧⌘P in the dashboard for a fuzzy-searchable
+  list of everything the app can do: jump to any panel or custom container
+  list, drive the Colima lifecycle, act on a container by name (start, stop,
+  restart, shell, logs, remove), and run or stop workflows. Matching is
+  token-based — "stop web" finds *Stop web-1*, and a container's image counts
+  too, so "nginx" surfaces its containers. Destructive commands (removing a
+  container, Clean Up, deleting the VM) confirm first with the same wording
+  as their buttons in the panels. ↑↓ to navigate, ↩ to run, esc to close.
+
 ## v0.6.5
 
 - 🚦 **Update check no longer trips GitHub's rate limit** — the latest version
