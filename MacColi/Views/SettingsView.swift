@@ -189,13 +189,15 @@ struct SettingsView: View {
                 state.errorMessage = "Couldn't read the certificate: \(error.localizedDescription)"
             }
         }
-        .alert("Delete Colima VM?", isPresented: $confirmDelete) {
-            Button("Delete", role: .destructive) { state.deleteColima() }
+        .alert(deleteVMCopy.title, isPresented: $confirmDelete) {
+            Button(deleteVMCopy.actionLabel, role: .destructive) { state.deleteColima() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(state.hasCustomProvisioning
-                 ? "This permanently removes the VM and everything inside it, including custom provisioning in colima.yaml. This cannot be undone."
-                 : "This permanently removes the VM and everything inside it. This cannot be undone.")
+            Text(deleteVMCopy.message)
         }
+    }
+
+    private var deleteVMCopy: ConfirmationCopy {
+        Confirmations.deleteVM(hasCustomProvisioning: state.hasCustomProvisioning)
     }
 }

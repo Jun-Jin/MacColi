@@ -71,6 +71,16 @@ struct DashboardView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle("MacColi")
+        // ⇧⌘P command palette, floated over the whole split view. Presented from
+        // AppState (not local state) because the shortcut lives in the app menu.
+        .overlay {
+            if state.showCommandPalette {
+                CommandPaletteOverlay(selection: $selection)
+            }
+        }
+        // The menu command can fire while this window is closed; don't surprise
+        // the user with a palette left open from that on the next window open.
+        .onAppear { state.showCommandPalette = false }
         .sheet(isPresented: $state.showInstaller) {
             InstallView()
         }

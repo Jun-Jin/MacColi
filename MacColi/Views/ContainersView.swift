@@ -283,17 +283,19 @@ private struct ContainerRow: View {
         // Suppressed in Select mode, where a click means "toggle selection" and a
         // single-row action menu would conflict with the multi-select workflow.
         .contextMenuIf(!selectMode) { rowMenu }
-        .confirmationDialog(listName == nil ? "Remove \(container.displayName)?"
+        // Inside a list, the destructive choice is labelled "Delete" to contrast
+        // with the non-destructive "Remove from <list>" alongside it; the shared
+        // copy's force-remove warning is kept either way.
+        .confirmationDialog(listName == nil ? Confirmations.removeContainer(container).title
                                             : "Delete \(container.displayName)?",
                             isPresented: $confirmRemove, titleVisibility: .visible) {
-            Button(listName == nil ? "Remove" : "Delete Container", role: .destructive) {
+            Button(listName == nil ? Confirmations.removeContainer(container).actionLabel
+                                   : "Delete Container", role: .destructive) {
                 state.removeContainer(container)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(container.isRunning
-                 ? "This container is running and will be force-removed. This cannot be undone."
-                 : "This cannot be undone.")
+            Text(Confirmations.removeContainer(container).message)
         }
     }
 

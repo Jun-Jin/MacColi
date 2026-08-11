@@ -63,14 +63,12 @@ struct ColimaControlView: View {
                 .help("docker system prune — remove unused containers, images, networks, and build cache older than 24h")
             }
             .disabled(state.isBusy)
-            .confirmationDialog("Remove unused data older than 24 hours?",
+            .confirmationDialog(Confirmations.prune.title,
                                 isPresented: $confirmPrune, titleVisibility: .visible) {
-                Button("Clean Up", role: .destructive) { state.pruneSystem() }
+                Button(Confirmations.prune.actionLabel, role: .destructive) { state.pruneSystem() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Deletes stopped containers, dangling images, unused networks, and "
-                     + "build cache not used in the last 24 hours. Volumes are kept. "
-                     + "This cannot be undone.")
+                Text(Confirmations.prune.message)
             }
 
         case .starting, .stopping:

@@ -43,6 +43,8 @@ struct MacColiApp: App {
             CommandGroup(after: .textEditing) {
                 Button("Find") { state.findRequestToken += 1 }
                     .keyboardShortcut("f", modifiers: .command)
+                Button("Command Palette") { state.showCommandPalette.toggle() }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
             }
         }
 

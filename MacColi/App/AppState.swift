@@ -63,6 +63,9 @@ final class AppState {
     // this and focuses its search field — the bridge from an app-level keyboard
     // command to the active view's local focus state.
     var findRequestToken = 0
+    // Toggled by the ⇧⌘P menu command; DashboardView presents the command
+    // palette overlay while set (same app-command → view bridge as Find).
+    var showCommandPalette = false
 
     // Managed root CA certificates installed into the VM (corporate proxy fix).
     private(set) var caCertificates: [String] = []
