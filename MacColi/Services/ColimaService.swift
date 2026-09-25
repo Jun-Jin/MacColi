@@ -18,22 +18,23 @@ struct ColimaService {
         return JSONLines.decode(ColimaInstance.self, from: result.stdout)
     }
 
-    /// The "default" profile if present, else the first one.
-    func defaultInstance() async throws -> ColimaInstance? {
-        let all = try await list()
-        return all.first { $0.name == "default" } ?? all.first
+    /// The named profile's instance, or nil if it doesn't exist (yet).
+    func instance(named profile: String) async throws -> ColimaInstance? {
+        try await list().first { $0.name == profile }
     }
 
     /// Best-effort snapshot of an existing profile's *live* configuration, so the
     /// UI can reflect the real VM rather than the app's stale defaults. Resource
     /// fields (cpu/memory/disk/arch/runtime) come from `colima list --json`;
     /// `vmType`/`rosetta`/`mountType` are absent there, so they're read from the
-    /// profile's `colima.yaml` when it can be located. Returns nil if no profile
-    /// exists yet.
-    func currentConfig(profile: String = "default") async -> ColimaConfig? {
+    /// profile's `colima.yaml` when it can be located. Exact-match only — never
+    /// falls back to another profile, so Settings can't be seeded from (and then
+    /// applied to) a different VM than the one selected. Returns nil if the
+    /// profile doesn't exist yet.
+    func currentConfig(profile: String) async -> ColimaConfig? {
         let all = (try? await list()) ?? []
-        let instance = all.first(where: { $0.name == profile }) ?? all.first
-        let name = instance?.name ?? profile
+        let instance = all.first { $0.name == profile }
+        let name = profile
         let yaml = Self.readProfileYAML(profile: name)
         // Need at least one source. A stopped/deleted VM has no `colima list`
         // entry but its `colima.yaml` survives — read from the file so "Reload
@@ -245,16 +246,16 @@ struct ColimaService {
     /// flags — so a restart can't silently apply unsaved Settings edits. Still
     /// reconciles the managed CA-cert provision block first, matching `start(_:)`,
     /// so corporate root CAs are reinstalled on the restart.
-    func start(profile: String = "default") async throws {
+    func start(profile: String) async throws {
         try? reconcileCAProvision(profile: profile)
         try await cli.run("colima", ["start", profile], environment: cli.colimaEnvironment())
     }
 
-    func stop(profile: String = "default") async throws {
+    func stop(profile: String) async throws {
         try await cli.run("colima", ["stop", profile], environment: cli.colimaEnvironment())
     }
 
-    func delete(profile: String = "default") async throws {
+    func delete(profile: String) async throws {
         try await cli.run("colima", ["delete", "--force", profile], environment: cli.colimaEnvironment())
     }
 
@@ -301,7 +302,7 @@ struct ColimaService {
     /// VM deletion — used to warn before destructive actions. MacColi's own
     /// managed CA region is excluded: it's regenerated from `maccoli-certs/` on
     /// the next start, so it isn't something the user loses.
-    func hasProvisioning(profile: String = "default") -> Bool {
+    func hasProvisioning(profile: String) -> Bool {
         guard let yaml = Self.readProfileYAML(profile: profile),
               let block = Self.topLevelBlock("provision", in: yaml) else { return false }
         var inManagedRegion = false
@@ -316,7 +317,7 @@ struct ColimaService {
 
     /// Writes/updates/removes the MacColi-managed provision block in the profile
     /// YAML to match the current managed certs. No-op if already in sync.
-    func reconcileCAProvision(profile: String = "default") throws {
+    func reconcileCAProvision(profile: String) throws {
         let certs = managedCACertificates()
         let path = Self.profileYAMLPath(profile)
         let existing = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""

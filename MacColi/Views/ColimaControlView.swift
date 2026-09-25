@@ -11,8 +11,11 @@ struct ColimaControlView: View {
                 Circle()
                     .fill(statusColor)
                     .frame(width: 10, height: 10)
-                Text("Colima")
+                // Surface a non-default profile so it's visible which VM the
+                // status and controls target without opening Settings.
+                Text(state.profile == "default" ? "Colima" : "Colima · \(state.profile)")
                     .font(.headline)
+                    .lineLimit(1)
                 Spacer()
                 Text(state.colimaState.label)
                     .font(.caption)

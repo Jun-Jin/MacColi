@@ -353,7 +353,7 @@ struct CommandPaletteView: View {
                 id: "colima.delete", title: "Delete Colima VM…",
                 subtitle: "Deletes the VM and all its containers, images, and volumes",
                 systemImage: "trash", section: .colima, keywords: "delete remove vm",
-                confirmation: Confirmations.deleteVM(hasCustomProvisioning: state.hasCustomProvisioning)
+                confirmation: Confirmations.deleteVM(profile: state.profile, hasCustomProvisioning: state.hasCustomProvisioning)
             ) { state.deleteColima() })
         }
 

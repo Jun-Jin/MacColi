@@ -6,6 +6,8 @@ struct SettingsView: View {
     @Environment(UpdateChecker.self) private var updater
     @State private var confirmDelete = false
     @State private var importingCert = false
+    @State private var showNewProfile = false
+    @State private var newProfileName = ""
 
     /// File types accepted by the CA importer. `.x509Certificate` covers DER/CER;
     /// PEM is plain text, so `.pem`/`.crt`-style content is allowed via `.text`
@@ -29,6 +31,24 @@ struct SettingsView: View {
         @Bindable var state = state
 
         Form {
+            Section("Profile") {
+                Picker("Profile", selection: $state.profile) {
+                    ForEach(state.availableProfiles, id: \.self) { name in
+                        Text(name).tag(name)
+                    }
+                }
+                // Disabled while a lifecycle command runs so the switch can't
+                // re-point status/resources mid start/stop of another VM.
+                .disabled(state.isBusy)
+                Button("New Profile…") {
+                    newProfileName = ""
+                    showNewProfile = true
+                }
+                .disabled(state.isBusy)
+                Text("Each profile is a separate VM with its own containers, images, and volumes. Switching re-points the whole app — status, resources, and the settings below. A new profile's VM is created on its first Start.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Virtual Machine") {
                 Stepper("CPUs: \(state.cpus)", value: $state.cpus, in: 1...16)
                 Stepper("Memory: \(state.memoryGiB) GiB", value: $state.memoryGiB, in: 1...64)
@@ -189,6 +209,13 @@ struct SettingsView: View {
                 state.errorMessage = "Couldn't read the certificate: \(error.localizedDescription)"
             }
         }
+        .alert("New Profile", isPresented: $showNewProfile) {
+            TextField("Name", text: $newProfileName)
+            Button("Create") { state.selectNewProfile(newProfileName) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Names the new Colima profile. Its VM is created with the current settings when you press Start.")
+        }
         .alert(deleteVMCopy.title, isPresented: $confirmDelete) {
             Button(deleteVMCopy.actionLabel, role: .destructive) { state.deleteColima() }
             Button("Cancel", role: .cancel) {}
@@ -198,6 +225,6 @@ struct SettingsView: View {
     }
 
     private var deleteVMCopy: ConfirmationCopy {
-        Confirmations.deleteVM(hasCustomProvisioning: state.hasCustomProvisioning)
+        Confirmations.deleteVM(profile: state.profile, hasCustomProvisioning: state.hasCustomProvisioning)
     }
 }

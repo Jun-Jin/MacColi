@@ -66,6 +66,19 @@ final class ShellPaths: @unchecked Sendable {
     }
 }
 
+/// Process-wide mirror of the Colima profile the app operates on. AppState owns
+/// the selection (persisted in UserDefaults) and pushes changes here, so
+/// non-MainActor code paths — docker-socket resolution, shell sessions,
+/// workflow runs — resolve against the same profile without hopping actors.
+final class ColimaProfile: @unchecked Sendable {
+    static let shared = ColimaProfile()
+    private let lock = NSLock()
+    private var value = "default"
+
+    var name: String { lock.withLock { value } }
+    func select(_ name: String) { lock.withLock { value = name } }
+}
+
 /// Locates command-line tools and runs them with a PATH that works even when
 /// the app is launched from Finder.
 struct CLI {
@@ -144,9 +157,10 @@ struct CLI {
         return (xdgBase as NSString).appendingPathComponent("colima")
     }
 
-    /// Path to Colima's docker socket for the default profile, if present.
+    /// Path to Colima's docker socket for the selected profile, if present.
     var colimaDockerSocket: String? {
-        let path = (colimaHome as NSString).appendingPathComponent("default/docker.sock")
+        let profile = ColimaProfile.shared.name
+        let path = (colimaHome as NSString).appendingPathComponent("\(profile)/docker.sock")
         return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 

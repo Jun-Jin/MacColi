@@ -76,6 +76,38 @@ final class AppState {
     private(set) var installLog: String = ""
     private(set) var installError: String?
 
+    // Which Colima profile the app operates on. Every status read, docker
+    // socket, and lifecycle command targets this VM, so changing it re-points
+    // the whole app: resources clear, Settings re-seed from the new profile's
+    // colima.yaml, and a refresh runs against the new VM. The selection is
+    // mirrored into `ColimaProfile.shared` so background code (docker env,
+    // shell sessions, workflows) resolves the same profile.
+    var profile: String {
+        didSet {
+            guard profile != oldValue else { return }
+            defaults.set(profile, forKey: "config.profile")
+            ColimaProfile.shared.select(profile)
+            // An explicit choice (picker or new-profile flow) — stop
+            // second-guessing the selection against `colima list`.
+            didReconcileProfile = true
+            didSyncLiveConfig = false
+            colimaState = .unknown
+            clearResources()
+            Task { await refresh() }
+        }
+    }
+    // Profile names offered by the Settings picker: everything `colima list`
+    // knows plus the current selection (which may not exist until first start).
+    private(set) var availableProfiles: [String] = ["default"]
+
+    // Profiles created in-app that colima doesn't know yet (never started).
+    // Until the first Start registers them with colima, the only record of
+    // their existence is this set — without it, switching the picker away from
+    // a fresh profile would drop it from the options entirely. Names are
+    // removed once `colima list` reports them (colima owns them from then on)
+    // or when the user deletes the profile.
+    @ObservationIgnored private var knownProfiles: Set<String>
+
     // Desired VM configuration. `@AppStorage` can't live inside an `@Observable`
     // class, so persistence is done manually against `UserDefaults` in `didSet`.
     var cpus: Int { didSet { defaults.set(cpus, forKey: "config.cpus") } }
@@ -119,10 +151,16 @@ final class AppState {
     // Seed Settings from the real VM only once per launch, so polling never
     // clobbers edits the user is making in the Settings panel.
     @ObservationIgnored private var didSyncLiveConfig = false
+    // Validate the stored profile selection against `colima list` only once per
+    // launch (see refresh()); set eagerly by an explicit selection so a profile
+    // the user just created isn't "corrected" away before its first start.
+    @ObservationIgnored private var didReconcileProfile = false
 
     init() {
         let d = UserDefaults.standard
         // `didSet` does not fire during initialization, so no redundant writes here.
+        profile = d.string(forKey: "config.profile") ?? "default"
+        knownProfiles = Set(d.stringArray(forKey: "config.knownProfiles") ?? [])
         cpus = d.object(forKey: "config.cpus") as? Int ?? 2
         memoryGiB = d.object(forKey: "config.memoryGiB") as? Int ?? 4
         diskGiB = d.object(forKey: "config.diskGiB") as? Int ?? 60
@@ -139,11 +177,15 @@ final class AppState {
         dnsHostsText = d.string(forKey: "config.dnsHosts") ?? ""
         caCertificates = colima.managedCACertificates()
         containerLists = Self.loadContainerLists(from: d)
+        availableProfiles = Self.mergeProfiles(Array(knownProfiles), selected: profile)
+        // `didSet` didn't fire above; push the restored selection to the mirror
+        // so docker-socket resolution targets the right profile from the start.
+        ColimaProfile.shared.select(profile)
     }
 
     var config: ColimaConfig {
         ColimaConfig(
-            profile: "default", cpus: cpus, memoryGiB: memoryGiB, diskGiB: diskGiB, runtime: runtime,
+            profile: profile, cpus: cpus, memoryGiB: memoryGiB, diskGiB: diskGiB, runtime: runtime,
             arch: arch, vmType: vmType, vzRosetta: vzRosetta, mountType: mountType,
             hostname: hostname.trimmingCharacters(in: .whitespaces),
             networkAddress: networkAddress,
@@ -152,6 +194,35 @@ final class AppState {
             kubernetesEnabled: kubernetesEnabled,
             kubernetesVersion: kubernetesVersion.trimmingCharacters(in: .whitespaces)
         )
+    }
+
+    /// Picker options for the profile selector: `default` first (always offered,
+    /// even before any VM exists), then every other known name sorted.
+    private static func mergeProfiles(_ names: [String], selected: String) -> [String] {
+        let rest = Set(names + [selected]).subtracting(["default"]).sorted()
+        return ["default"] + rest
+    }
+
+    /// Switches to a profile that may not exist yet — the "New Profile…" flow.
+    /// The VM itself is only created when the user hits Start, which passes the
+    /// current Settings to `colima start <name>`.
+    func selectNewProfile(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard trimmed.wholeMatch(of: /[A-Za-z0-9][A-Za-z0-9_.-]*/) != nil else {
+            errorMessage = "Profile names must start with a letter or digit and may "
+                + "only contain letters, digits, dots, dashes, and underscores."
+            return
+        }
+        // Remember the name independently of the selection: until its first
+        // start, nothing else records that this profile exists.
+        knownProfiles.insert(trimmed)
+        persistKnownProfiles()
+        availableProfiles = Self.mergeProfiles(availableProfiles + [trimmed], selected: trimmed)
+        profile = trimmed
+    }
+
+    private func persistKnownProfiles() {
+        defaults.set(knownProfiles.sorted(), forKey: "config.knownProfiles")
     }
 
     /// Parses the `host=target` lines of the DNS-hosts editor into mappings,
@@ -299,10 +370,34 @@ final class AppState {
         }
 
         do {
-            if let instance = try await colima.defaultInstance() {
+            let instances = try await colima.list()
+            let names = instances.map(\.name)
+            // Colima now tracks these — hand ownership over, so an external
+            // `colima delete` also removes them from the picker.
+            let adopted = knownProfiles.intersection(names)
+            if !adopted.isEmpty {
+                knownProfiles.subtract(adopted)
+                persistKnownProfiles()
+            }
+            availableProfiles = Self.mergeProfiles(names + knownProfiles, selected: profile)
+            // Once per launch: a stored selection that no longer exists (profile
+            // deleted from Terminal, defaults carried over) would silently target
+            // a VM that isn't there — adopt default (or the first real profile)
+            // instead. Explicit selections skip this via didReconcileProfile, and
+            // an in-app-created profile awaiting its first start is a valid target.
+            if !didReconcileProfile {
+                didReconcileProfile = true
+                if !instances.isEmpty, !names.contains(profile), !knownProfiles.contains(profile) {
+                    profile = (instances.first { $0.name == "default" } ?? instances[0]).name
+                    return   // the didSet already kicked off a refresh of the new profile
+                }
+            }
+            if let instance = instances.first(where: { $0.name == profile }) {
                 colimaState = instance.isRunning ? .running(instance) : .stopped
                 await syncConfigFromLiveVM()
             } else {
+                // The selected profile has no VM yet (a freshly named one) —
+                // Start will create it with the current Settings.
                 colimaState = .stopped
             }
         } catch {
@@ -325,7 +420,7 @@ final class AppState {
     /// never overwrites in-progress edits.
     private func syncConfigFromLiveVM() async {
         guard !didSyncLiveConfig else { return }
-        guard let live = await colima.currentConfig() else { return }
+        guard let live = await colima.currentConfig(profile: profile) else { return }
         didSyncLiveConfig = true
         applyLiveConfig(live)
     }
@@ -341,8 +436,8 @@ final class AppState {
             busyMessage = "Reloading from colima.yaml…"
             errorMessage = nil
             defer { isBusy = false; busyMessage = "" }
-            guard let live = await colima.currentConfig() else {
-                errorMessage = "No Colima profile was found to read configuration from."
+            guard let live = await colima.currentConfig(profile: profile) else {
+                errorMessage = "No configuration was found for the “\(profile)” profile."
                 return
             }
             applyLiveConfig(live)
@@ -439,7 +534,7 @@ final class AppState {
     func stopColima() {
         perform("Stopping Colima…") {
             self.colimaState = .stopping
-            try await self.colima.stop()
+            try await self.colima.stop(profile: self.profile)
             await self.refresh()
         }
     }
@@ -452,16 +547,20 @@ final class AppState {
     func restartColima() {
         runToRunning("Restarting Colima…") {
             self.colimaState = .stopping
-            try await self.colima.stop()
+            try await self.colima.stop(profile: self.profile)
             self.colimaState = .starting
-            try await self.colima.start()
+            try await self.colima.start(profile: self.profile)
         }
     }
 
     func deleteColima() {
         perform("Deleting Colima VM…") {
             self.colimaState = .stopping
-            try await self.colima.delete()
+            // Deleting also forgets a never-started profile, whose picker entry
+            // exists only through knownProfiles (colima has nothing to delete).
+            self.knownProfiles.remove(self.profile)
+            self.persistKnownProfiles()
+            try await self.colima.delete(profile: self.profile)
             await self.refresh()
         }
     }
@@ -471,7 +570,7 @@ final class AppState {
     func applyConfig() {
         runToRunning("Applying configuration…") {
             self.colimaState = .stopping
-            try await self.colima.stop()
+            try await self.colima.stop(profile: self.profile)
             self.colimaState = .starting
             try await self.colima.start(self.config)
         }
@@ -806,7 +905,7 @@ final class AppState {
     /// True when the profile's `colima.yaml` carries a hand-written `provision`
     /// block (beyond MacColi's managed CA region), so deleting the VM also
     /// discards setup the user maintains outside this app.
-    var hasCustomProvisioning: Bool { colima.hasProvisioning() }
+    var hasCustomProvisioning: Bool { colima.hasProvisioning(profile: profile) }
 
     // MARK: - Helpers
 
@@ -842,7 +941,7 @@ final class AppState {
             let watcher = Task { @MainActor in
                 var sawDown = false
                 while !Task.isCancelled {
-                    let inst = try? await self.colima.defaultInstance()
+                    let inst = try? await self.colima.instance(named: self.profile)
                     if let inst, inst.isRunning {
                         if sawDown {
                             self.colimaState = .running(inst)

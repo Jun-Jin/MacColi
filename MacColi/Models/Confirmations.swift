@@ -34,9 +34,9 @@ enum Confirmations {
         actionLabel: "Clean Up")
 
     /// `colima delete` — the whole VM and everything inside it.
-    static func deleteVM(hasCustomProvisioning: Bool) -> ConfirmationCopy {
+    static func deleteVM(profile: String, hasCustomProvisioning: Bool) -> ConfirmationCopy {
         ConfirmationCopy(
-            title: "Delete Colima VM?",
+            title: "Delete the “\(profile)” Colima VM?",
             message: hasCustomProvisioning
                 ? "This permanently removes the VM and everything inside it, including custom provisioning in colima.yaml. This cannot be undone."
                 : "This permanently removes the VM and everything inside it. This cannot be undone.",
