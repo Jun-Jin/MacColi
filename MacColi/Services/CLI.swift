@@ -164,11 +164,27 @@ struct CLI {
         return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 
-    /// Environment for invoking `colima`: augmented PATH plus the resolved
+    /// Default environment for tool invocations: augmented PATH plus the login
+    /// shell's `XDG_CONFIG_HOME` when the app didn't inherit one. Homebrew
+    /// resolves its trust store (`trust.json`) against `XDG_CONFIG_HOME`, so
+    /// omitting it makes `brew` consult `~/.homebrew/` instead and refuse taps
+    /// the user already trusted in Terminal.
+    var baseEnvironment: [String: String] {
+        var env = ["PATH": augmentedPATH]
+        let xdg = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"]
+            .flatMap { $0.isEmpty ? nil : $0 }
+            ?? ShellPaths.shared.xdgConfigHome
+        if let xdg { env["XDG_CONFIG_HOME"] = xdg }
+        return env
+    }
+
+    /// Environment for invoking `colima`: the base environment plus the resolved
     /// `COLIMA_HOME`, so the subprocess targets the same home the app reasons
     /// about rather than re-resolving against its own minimal environment.
     func colimaEnvironment() -> [String: String] {
-        ["PATH": augmentedPATH, "COLIMA_HOME": colimaHome]
+        var env = baseEnvironment
+        env["COLIMA_HOME"] = colimaHome
+        return env
     }
 
     /// Environment for invoking `docker`, routed through Colima's socket when available.
@@ -219,7 +235,7 @@ struct CLI {
                 _ arguments: [String],
                 environment: [String: String]? = nil) async throws -> CommandResult {
         guard let binary = path(for: name) else { throw CLIError.notInstalled(name) }
-        let env = environment ?? ["PATH": augmentedPATH]
+        let env = environment ?? baseEnvironment
         return try await runner.run(binary, arguments, environment: env)
     }
 
@@ -243,7 +259,7 @@ struct CLI {
                       environment: [String: String]? = nil,
                       onOutput: @escaping @Sendable (String) -> Void) async throws -> Int32 {
         guard let binary = path(for: name) else { throw CLIError.notInstalled(name) }
-        let env = environment ?? ["PATH": augmentedPATH]
+        let env = environment ?? baseEnvironment
         return try await runner.runStreaming(binary, arguments, environment: env, onOutput: onOutput)
     }
 

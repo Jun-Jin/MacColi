@@ -30,6 +30,12 @@ final class UpdateChecker {
 
     static let releasesPage = URL(string: "https://github.com/Jun-Jin/MacColi/releases/latest")!
 
+    /// The tap the `maccoli` cask ships from. Newer Homebrew refuses to load
+    /// third-party taps never marked trusted (`brew trust`), and the in-app
+    /// `brew` has no TTY to answer the consent prompt — so users whose install
+    /// predates the trust store would fail their first in-app upgrade.
+    private static let tap = "jun-jin/maccoli"
+
     /// Quiet launch checks run at most once per day — the fetch avoids the
     /// rate-limited API, but there's still no reason to hit GitHub on every
     /// dev-loop relaunch. Stored on successful fetches only, so an offline
@@ -80,6 +86,11 @@ final class UpdateChecker {
         phase = .upgrading
         upgradeStatusLine = ""
         do {
+            // Best-effort: trusting our own tap is the user's install-time
+            // choice restated, older brew has no `trust` subcommand, and an
+            // already-trusted tap answers with a no-op — so any failure here
+            // is ignored and the upgrade itself decides the outcome.
+            _ = try? await CLI.shared.runRaw("brew", ["trust", "--tap", Self.tap])
             try await CLI.shared.runStreamingChecked(
                 "brew", ["upgrade", "--cask", "maccoli"]
             ) { line in
