@@ -187,13 +187,37 @@ jobs:
             dist/*.dmg
           if-no-files-found: error
 
+      # Release body: the tag's `## vX.Y.Z` section of docs/RELEASE_NOTES.md
+      # (up to the next `## ` heading, blank edges trimmed) when one exists,
+      # followed by GitHub's auto-generated notes.
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          awk -v heading="## $GITHUB_REF_NAME" '
+              /^## / { if (found) exit; sub(/[[:space:]]+$/, ""); found = ($0 == heading); next }
+              found  { lines[++n] = $0 }
+              END {
+                  first = 1; while (first <= n && lines[first] ~ /^[[:space:]]*$/) first++
+                  while (n >= first && lines[n] ~ /^[[:space:]]*$/) n--
+                  for (i = first; i <= n; i++) print lines[i]
+              }
+          ' docs/RELEASE_NOTES.md > "$NOTES"
+
+          # --generate-notes always runs so the "Full Changelog" compare link is
+          # kept; gh prepends a provided notes file to the generated notes.
+          NOTES_ARGS=(--generate-notes)
+          if [[ -s "$NOTES" ]]; then
+              echo "Using the $GITHUB_REF_NAME section of docs/RELEASE_NOTES.md"
+              NOTES_ARGS+=(--notes-file "$NOTES")
+          else
+              echo "No $GITHUB_REF_NAME section in docs/RELEASE_NOTES.md — generating notes"
+          fi
           gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.dmg \
-            --title "MacColi $GITHUB_REF_NAME" --generate-notes
+            --title "MacColi $GITHUB_REF_NAME" "${NOTES_ARGS[@]}"
 
       # Update the Homebrew cask in Jun-Jin/homebrew-maccoli to point at this
       # release. We hash the DMG we just built (authoritative — it's the exact
