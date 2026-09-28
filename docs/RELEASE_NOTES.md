@@ -4,6 +4,19 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.7.0
+
+- 🗂️ **Colima profile selection** — the app no longer hardcodes the `default`
+  profile. Pick which profile to target from the new picker in Settings or
+  straight from the sidebar header (the two stay in sync), and every status
+  check, docker socket, and lifecycle command follows the selection. A New
+  Profile flow creates named profiles in-app; names are remembered until
+  their first start, since colima only learns about a profile then.
+- 🧹 **Deleting the VM also removes its profile folder** — a profile that was
+  configured in-app but never started leaves a config folder (with its
+  `colima.yaml`) that `colima delete` doesn't know about; the delete flow now
+  sweeps it so nothing is left on disk, and the confirmation dialog says so.
+
 ## v0.6.6
 
 - ⌨️ **⇧⌘P command palette** — press ⇧⌘P in the dashboard for a fuzzy-searchable
