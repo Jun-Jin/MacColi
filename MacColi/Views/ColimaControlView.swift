@@ -6,16 +6,34 @@ struct ColimaControlView: View {
     @State private var confirmPrune = false
 
     var body: some View {
+        @Bindable var state = state
+
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Circle()
                     .fill(statusColor)
                     .frame(width: 10, height: 10)
-                // Surface a non-default profile so it's visible which VM the
-                // status and controls target without opening Settings.
-                Text(state.profile == "default" ? "Colima" : "Colima · \(state.profile)")
-                    .font(.headline)
-                    .lineLimit(1)
+                // The header doubles as the profile switcher: it names the VM
+                // the status and controls target, and clicking it re-points the
+                // app. Same binding as the Settings picker, so the two stay in
+                // step. Creating profiles stays in Settings — this only switches.
+                Menu {
+                    Picker("Profile", selection: $state.profile) {
+                        ForEach(state.availableProfiles, id: \.self) { name in
+                            Text(name).tag(name)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    Text(state.profile == "default" ? "Colima" : "Colima · \(state.profile)")
+                        .font(.headline)
+                        .lineLimit(1)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                // Same guard as Settings: no re-pointing mid start/stop.
+                .disabled(state.isBusy)
+                .help("Switch Colima profile")
                 Spacer()
                 Text(state.colimaState.label)
                     .font(.caption)
