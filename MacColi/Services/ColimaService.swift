@@ -259,6 +259,18 @@ struct ColimaService {
         try await cli.run("colima", ["delete", "--force", profile], environment: cli.colimaEnvironment())
     }
 
+    /// Removes a profile's configuration folder. `colima delete` already cleans
+    /// it up for a VM it knows, but a never-started profile can leave one behind
+    /// (reconcileCAProvision writes `colima.yaml` before the first start), so
+    /// deletion sweeps it explicitly to leave no trace on disk. Best-effort.
+    func removeProfileDirectory(profile: String) {
+        let dir = (Self.profileYAMLPath(profile) as NSString).deletingLastPathComponent
+        // Only ever a folder named after the profile itself — never a home dir
+        // (guards against an empty/odd name resolving up the tree).
+        guard (dir as NSString).lastPathComponent == profile, !profile.isEmpty else { return }
+        try? FileManager.default.removeItem(atPath: dir)
+    }
+
     // MARK: - CA certificates (corporate-proxy provisioning)
 
     private static let caBeginMarker = "# maccoli:ca-certs:begin (managed by MacColi — do not edit)"

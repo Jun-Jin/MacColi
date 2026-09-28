@@ -350,8 +350,8 @@ struct CommandPaletteView: View {
         ) { Task { await state.refresh() } })
         if state.colimaState != .notInstalled {
             commands.append(PaletteCommand(
-                id: "colima.delete", title: "Delete Colima VM…",
-                subtitle: "Deletes the VM and all its containers, images, and volumes",
+                id: "colima.delete", title: "Delete Colima VM & Profile…",
+                subtitle: "Deletes the VM, its containers, images, and volumes, and the profile folder",
                 systemImage: "trash", section: .colima, keywords: "delete remove vm",
                 confirmation: Confirmations.deleteVM(profile: state.profile, hasCustomProvisioning: state.hasCustomProvisioning)
             ) { state.deleteColima() })

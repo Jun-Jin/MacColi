@@ -554,14 +554,31 @@ final class AppState {
     }
 
     func deleteColima() {
-        perform("Deleting Colima VM…") {
+        let target = profile
+        perform("Deleting “\(target)”…") {
             self.colimaState = .stopping
             // Deleting also forgets a never-started profile, whose picker entry
             // exists only through knownProfiles (colima has nothing to delete).
-            self.knownProfiles.remove(self.profile)
+            self.knownProfiles.remove(target)
             self.persistKnownProfiles()
-            try await self.colima.delete(profile: self.profile)
-            await self.refresh()
+            // `colima delete` removes the VM plus both of its folders (the
+            // profile config dir and the lima instance dir) — but errors on a
+            // profile it has never started, so only call it when a VM exists.
+            if try await self.colima.instance(named: target) != nil {
+                try await self.colima.delete(profile: target)
+            }
+            // Sweep any leftover profile folder: a never-started profile can
+            // hold a colima.yaml (the CA provision block is written ahead of a
+            // start that never completed), which colima won't clean up.
+            self.colima.removeProfileDirectory(profile: target)
+            // The deleted profile is gone from the picker; deliberately land on
+            // default rather than leaving the selection pointing at nothing —
+            // Start there would silently recreate the just-deleted profile.
+            if target != "default" {
+                self.profile = "default"   // didSet refreshes against default
+            } else {
+                await self.refresh()
+            }
         }
     }
 

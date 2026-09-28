@@ -191,9 +191,9 @@ struct SettingsView: View {
             }
 
             Section("Danger Zone") {
-                Button("Delete Colima VM…", role: .destructive) { confirmDelete = true }
+                Button("Delete Colima VM & Profile…", role: .destructive) { confirmDelete = true }
                     .disabled(state.colimaState == .notInstalled || state.isBusy)
-                Text("Deletes the VM and all its containers, images, and volumes.")
+                Text("Deletes the VM — containers, images, and volumes — and the profile's configuration folder. The selection then returns to “default”.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
