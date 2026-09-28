@@ -4,6 +4,15 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.7.1
+
+- 🍺 **In-app upgrades work again on newer Homebrew** — Homebrew now refuses
+  casks from untrusted taps, and the in-app upgrade tripped over it: a
+  Finder-launched app didn't see your `XDG_CONFIG_HOME`, so brew looked at
+  the wrong trust store, and older installs had no trust entry at all with
+  no terminal to answer the prompt. The app now forwards `XDG_CONFIG_HOME`
+  to brew and trusts its own tap before upgrading.
+
 ## v0.7.0
 
 - 🗂️ **Colima profile selection** — the app no longer hardcodes the `default`
