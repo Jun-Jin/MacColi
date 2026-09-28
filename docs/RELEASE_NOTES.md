@@ -4,6 +4,15 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.7.2
+
+- 🔄 **In-app upgrades pick up same-day releases** — Homebrew refreshes its
+  taps at most once a day, so a release published since then was invisible
+  to it: `brew upgrade` reported nothing to do and the app offered a relaunch
+  into the same version. The app now runs `brew update` before upgrading,
+  and checks that the new version actually landed before offering to
+  relaunch.
+
 ## v0.7.1
 
 - 🍺 **In-app upgrades work again on newer Homebrew** — Homebrew now refuses
