@@ -82,24 +82,55 @@ final class UpdateChecker {
     /// this (old) binary keeps running, so the flow ends in `relaunchReady`
     /// rather than done.
     func upgrade() async {
-        guard case .available = phase else { return }
+        guard case .available(let latest) = phase else { return }
         phase = .upgrading
         upgradeStatusLine = ""
+        let onOutput: @Sendable (String) -> Void = { line in
+            Task { @MainActor in self.upgradeStatusLine = line }
+        }
         do {
             // Best-effort: trusting our own tap is the user's install-time
             // choice restated, older brew has no `trust` subcommand, and an
             // already-trusted tap answers with a no-op — so any failure here
             // is ignored and the upgrade itself decides the outcome.
             _ = try? await CLI.shared.runRaw("brew", ["trust", "--tap", Self.tap])
+            // Auto-update runs at most once per 24h, so a release published
+            // since the last one is still missing from the local tap and
+            // `brew upgrade` would call the old version current. An explicit
+            // `brew update` runs even under `HOMEBREW_NO_AUTO_UPDATE` (which
+            // would override `HOMEBREW_AUTO_UPDATE_SECS=0`). Best-effort too:
+            // an unrelated broken tap can fail it after ours refreshed, and
+            // the version check below catches a tap that really is stale.
+            _ = try? await CLI.shared.runStreaming("brew", ["update"], onOutput: onOutput)
+            var env = CLI.shared.baseEnvironment
+            env["HOMEBREW_NO_AUTO_UPDATE"] = "1"  // just updated above
             try await CLI.shared.runStreamingChecked(
-                "brew", ["upgrade", "--cask", "maccoli"]
-            ) { line in
-                Task { @MainActor in self.upgradeStatusLine = line }
+                "brew", ["upgrade", "--cask", "maccoli"], environment: env,
+                onOutput: onOutput
+            )
+            // `brew upgrade` exits 0 when it sees nothing newer, so success
+            // alone doesn't prove the bundle on disk was replaced.
+            let installed = await Self.installedCaskVersion()
+            guard let installed, !Self.isNewer(latest, than: installed) else {
+                phase = .failed("Homebrew didn't install \(latest) (installed: "
+                    + "\(installed ?? "unknown")). Run `brew update && brew upgrade "
+                    + "--cask maccoli` in Terminal, or try again later.")
+                return
             }
             phase = .relaunchReady
         } catch {
             phase = .failed(error.localizedDescription)
         }
+    }
+
+    /// The cask version Homebrew has installed, from `brew list --versions`
+    /// (`maccoli 0.7.1`); nil when it can't be read.
+    private static func installedCaskVersion() async -> String? {
+        guard let result = try? await CLI.shared.runRaw(
+            "brew", ["list", "--cask", "--versions", "maccoli"]),
+            result.succeeded
+        else { return nil }
+        return result.stdout.split(whereSeparator: \.isWhitespace).last.map(String.init)
     }
 
     /// Starts a fresh instance (the new binary, now that the bundle was
