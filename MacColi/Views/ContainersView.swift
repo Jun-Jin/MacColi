@@ -45,6 +45,16 @@ struct ContainersView: View {
     /// stale or filtered-out ids never count toward an action.
     private var selected: [Container] { filtered.filter { selection.contains($0.id) } }
 
+    /// How many of `base` each status segment would show, e.g. All 98 / Running
+    /// 45 / Stopped 53. Counted before the text query so the numbers describe the
+    /// panel's containers, not the current search, and they move with container
+    /// state since `base` is derived from `state.containers` on every refresh.
+    private var statusCounts: [StatusFilter: Int] {
+        var counts = [StatusFilter: Int]()
+        for f in StatusFilter.allCases { counts[f] = base.count { f.matches($0) } }
+        return counts
+    }
+
     var body: some View {
         Group {
             if !state.colimaState.isRunning {
@@ -91,7 +101,9 @@ struct ContainersView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Picker("Status", selection: $statusFilter) {
-                    ForEach(StatusFilter.allCases) { Text($0.label).tag($0) }
+                    ForEach(StatusFilter.allCases) { f in
+                        Text("\(f.label) (\(statusCounts[f] ?? 0))").tag(f)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
