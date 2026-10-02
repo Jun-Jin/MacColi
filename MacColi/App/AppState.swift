@@ -481,6 +481,13 @@ final class AppState {
         if let networks { self.networks = networks }
     }
 
+    /// Re-reads just the container list (one `docker ps -a`), keeping the
+    /// last-known list on failure like refreshResources(). Cheap enough to call
+    /// between the steps of a bulk action.
+    func refreshContainers() async {
+        if let containers = try? await docker.containers() { self.containers = containers }
+    }
+
     /// Refreshes resources, retrying on a short cadence while docker is still
     /// coming up after a (re)start. The daemon's socket can lag the VM's
     /// "running" status by several seconds; without this the panels stay on their
@@ -744,12 +751,24 @@ final class AppState {
 
     // MARK: - Bulk actions
 
-    func startContainers(_ cs: [Container]) { bulkAction(cs, "Starting \(cs.count) containers…") { try await self.docker.startContainer($0.id) } }
-    func stopContainers(_ cs: [Container]) { bulkAction(cs, "Stopping \(cs.count) containers…") { try await self.docker.stopContainer($0.id) } }
-    func restartContainers(_ cs: [Container]) { bulkAction(cs, "Restarting \(cs.count) containers…") { try await self.docker.restartContainer($0.id) } }
+    // Container actions re-read `docker ps` as each item completes so the list —
+    // and the All/Running/Stopped counts over it — moves container by container
+    // instead of jumping once at the end. The background poll can't do this: it
+    // is suspended while isBusy. Images/volumes/networks keep the single refresh
+    // at the end; their panels have no live counter worth the extra calls.
+    func startContainers(_ cs: [Container]) {
+        bulkAction(cs, "Starting \(cs.count) containers…", afterEach: refreshContainers) { try await self.docker.startContainer($0.id) }
+    }
+    func stopContainers(_ cs: [Container]) {
+        bulkAction(cs, "Stopping \(cs.count) containers…", afterEach: refreshContainers) { try await self.docker.stopContainer($0.id) }
+    }
+    func restartContainers(_ cs: [Container]) {
+        bulkAction(cs, "Restarting \(cs.count) containers…", afterEach: refreshContainers) { try await self.docker.restartContainer($0.id) }
+    }
     func removeContainers(_ cs: [Container]) {
         let keys = cs.map(\.membershipKey)
         bulkAction(cs, "Removing \(cs.count) containers…",
+                   afterEach: refreshContainers,
                    onSuccess: {
                        // Detach only containers that are actually gone after the
                        // refresh, so a partial failure never orphans a still-live
@@ -762,13 +781,24 @@ final class AppState {
     func removeVolumes(_ vols: [Volume]) { bulkAction(vols, "Removing \(vols.count) volumes…") { try await self.docker.removeVolume($0.name, force: false) } }
     func removeNetworks(_ nets: [DockerNetwork]) { bulkAction(nets, "Removing \(nets.count) networks…") { try await self.docker.removeNetwork($0.id) } }
 
-    /// Applies `work` to each selected item under a single busy overlay, then
-    /// refreshes resources once. Individual failures don't abort the run — the
-    /// rest still proceed — and are surfaced together: the first error's message
-    /// plus a count, rather than one banner per failed item.
+    /// How many `work` items a bulk action runs at once. Each one is a child
+    /// process with stdout/stderr pipes, and a GUI app's default fd soft limit is
+    /// 256, so an unbounded fan-out over ~100 containers could exhaust it. 16 is
+    /// well inside that and still lets a 100-container `docker stop` (10 s grace
+    /// each) finish in about a minute instead of ~17.
+    private static let bulkConcurrency = 16
+
+    /// Applies `work` to every selected item under a single busy overlay —
+    /// `bulkConcurrency` at a time, in no particular order — then refreshes
+    /// resources once. Individual failures don't abort the run — the rest still
+    /// proceed — and are surfaced together: one of the errors' messages plus a
+    /// count, rather than one banner per failed item. `afterEach` runs on the
+    /// main actor as each item finishes (succeeded or not), for callers that want
+    /// the UI to track progress item by item; keep it cheap, it runs N times.
     private func bulkAction<Item: Sendable>(_ items: [Item], _ message: String,
+                                            afterEach: (() async -> Void)? = nil,
                                             onSuccess: (() -> Void)? = nil,
-                                            _ work: @escaping (Item) async throws -> Void) {
+                                            _ work: @escaping @Sendable (Item) async throws -> Void) {
         guard !items.isEmpty else { return }
         Task {
             isBusy = true
@@ -778,11 +808,24 @@ final class AppState {
             defer { isBusy = false; busyMessage = "" }
             var firstError: Error?
             var failures = 0
-            for item in items {
-                do { try await work(item) }
-                catch {
-                    failures += 1
-                    if firstError == nil { firstError = error }
+            await withTaskGroup(of: Error?.self) { group in
+                var pending = items.makeIterator()
+                func launchNext() {
+                    guard let item = pending.next() else { return }
+                    group.addTask {
+                        do { try await work(item); return nil } catch { return error }
+                    }
+                }
+                for _ in 0..<Self.bulkConcurrency { launchNext() }
+                // Each completion refills the window with the next item, so the
+                // number in flight stays at the cap until the queue drains.
+                for await error in group {
+                    if let error {
+                        failures += 1
+                        if firstError == nil { firstError = error }
+                    }
+                    await afterEach?()
+                    launchNext()
                 }
             }
             await refreshResources()
