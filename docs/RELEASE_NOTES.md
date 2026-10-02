@@ -4,6 +4,13 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.7.4
+
+- ⚡ **Bulk container actions run in parallel** — Select → Start/Stop/Restart/
+  Remove used to work through the selection one container at a time and only
+  refresh the list at the end. They now run 16 at a time, and the list (and
+  the counts above it) updates as each container finishes.
+
 ## v0.7.3
 
 - 🔢 **Container counts in the status filter** — the All / Running / Stopped
@@ -11,10 +18,6 @@ notarized `.dmg`/`.zip` artifacts.
   `All (98) / Running (45) / Stopped (53)`. Inside a custom list the counts
   cover that list's members, and they move with container state on every
   refresh.
-- ⚡ **Bulk container actions run in parallel** — Select → Start/Stop/Restart/
-  Remove used to work through the selection one container at a time and only
-  refresh the list at the end. They now run 16 at a time, and the list (and
-  the counts above it) updates as each container finishes.
 
 ## v0.7.2
 
