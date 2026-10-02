@@ -4,6 +4,14 @@ All notable changes to MacColi, newest first. Each version is also published on
 the [GitHub releases page](https://github.com/Jun-Jin/MacColi/releases) with the
 notarized `.dmg`/`.zip` artifacts.
 
+## v0.7.3
+
+- 🔢 **Container counts in the status filter** — the All / Running / Stopped
+  segments in Containers now show how many containers each would list, e.g.
+  `All (98) / Running (45) / Stopped (53)`. Inside a custom list the counts
+  cover that list's members, and they move with container state on every
+  refresh.
+
 ## v0.7.2
 
 - 🔄 **In-app upgrades pick up same-day releases** — Homebrew refreshes its
