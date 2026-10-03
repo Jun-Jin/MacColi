@@ -12,16 +12,28 @@ struct LogsView: View {
     @AppStorage("logWindow.width") private var width = 680.0
     @AppStorage("logWindow.height") private var height = 460.0
 
-    @State private var text = ""
+    // Both modes render through the same AppKit-backed pane (LogTextView):
+    // a snapshot replaces the rows once, follow appends drained batches. The
+    // ids stay absolute so the pane can diff appends against its text storage
+    // instead of re-laying-out the whole log — full cross-line selection
+    // included, which pure-SwiftUI rendering couldn't offer at this size.
+    @State private var lines: [LogLine] = []
     @State private var isLoading = true
     @State private var follow = false
-    // Lines stream in on a background thread; the buffer caps memory and a timer
-    // drains it into `text`, so render rate is decoupled from log rate.
+    // Lines stream in on a background thread; the buffer caps memory and a
+    // timer drains only the new lines, so render rate is decoupled from log
+    // rate and each flush costs the batch size, not the backlog.
     @State private var buffer = LogBuffer()
-    // Scroll to the bottom once after the first content loads (newest line first).
-    @State private var pendingInitialScroll = true
+    // Mirrors controlActiveState for the flush loop: the window's environment
+    // value can't be read live from the captured task closure, this can. While
+    // the window is inactive the loop stops draining — the buffer keeps
+    // absorbing (bounded), and reactivation catches the display up in one batch.
+    @State private var renderActive = true
+    @Environment(\.controlActiveState) private var activeState
 
-    private let bottomID = "logs.bottom"
+    // Rows kept in the live view; matches the buffer cap so a long follow
+    // can't grow the row set without bound.
+    private static let maxDisplayLines = 5_000
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,7 +46,7 @@ struct LogsView: View {
                     .help("Stream new log lines live")
                 Button { clear() } label: { Image(systemName: "trash") }
                     .help("Clear the view (docker's stored logs are kept — Reload restores them)")
-                    .disabled(isLoading || text.isEmpty)
+                    .disabled(isLoading || lines.isEmpty)
                 Button { Task { await loadSnapshot() } } label: { Image(systemName: "arrow.clockwise") }
                     .help("Reload")
                     .disabled(follow)
@@ -44,26 +56,14 @@ struct LogsView: View {
             .padding(12)
             Divider()
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    if isLoading {
-                        ProgressView().padding(40)
-                    } else {
-                        Text(text.isEmpty ? "No log output." : text)
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                    }
-                    // Anchor used to pin the view to the newest line.
-                    Color.clear.frame(height: 1).id(bottomID)
-                }
-                .background(Color(nsColor: .textBackgroundColor))
-                .onChange(of: text) {
-                    // Stay pinned while following; otherwise only on the first load.
-                    guard follow || pendingInitialScroll else { return }
-                    pendingInitialScroll = false
-                    proxy.scrollTo(bottomID, anchor: .bottom)
+            ZStack {
+                LogTextView(lines: lines)
+                if isLoading {
+                    ProgressView()
+                } else if lines.isEmpty {
+                    Text("No log output.")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -82,40 +82,47 @@ struct LogsView: View {
         // Toggling Follow (or dismissing) cancels this task, which terminates the
         // stream process and stops the flush loop.
         .task(id: follow) { follow ? await startFollowing() : await loadSnapshot() }
+        .onChange(of: activeState) { renderActive = activeState != .inactive }
     }
 
     /// Empties the visible log. Clears the stream buffer too, so while following
-    /// the next flush rebuilds from new lines only instead of repainting the
+    /// the next flush resumes from new lines only instead of restoring the
     /// cleared history. View-only: docker's stored logs are untouched.
     private func clear() {
         buffer.clear()
-        text = ""
-        pendingInitialScroll = false
+        lines = []
     }
 
     /// One-shot snapshot of the current tail (the default, frozen view).
     private func loadSnapshot() async {
         isLoading = true
-        text = await state.logs(for: container)
+        let raw = await state.logs(for: container)
+        // Fresh 0-based ids deliberately don't adjoin whatever was shown
+        // before, which tells the pane to rebuild and pin to the newest line.
+        let trimmed = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
+        lines = trimmed.isEmpty ? [] : trimmed
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .enumerated()
+            .map { LogLine(id: $0.offset, text: String($0.element)) }
         isLoading = false
-        pendingInitialScroll = true
     }
 
-    /// Live stream: ingest lines into the buffer off-thread, render on a ~10 Hz
-    /// timer, and note when the stream ends on its own (container stopped).
+    /// Live stream: ingest lines into the buffer off-thread, append only the
+    /// new lines to the rows on a 2 Hz timer (paused while the window is
+    /// inactive), and note when the stream ends on its own (container stopped).
     private func startFollowing() async {
         isLoading = true
         buffer.clear()
-        text = ""
+        lines = []
 
         let buf = buffer
         let flush = Task { @MainActor in
             while !Task.isCancelled {
-                if let joined = buf.drainIfChanged() {
+                if renderActive, let batch = buf.drainNew() {
                     isLoading = false
-                    text = joined
+                    appendBatch(batch)
                 }
-                try? await Task.sleep(for: .milliseconds(150))
+                try? await Task.sleep(for: .milliseconds(500))
             }
         }
         defer { flush.cancel() }
@@ -124,9 +131,24 @@ struct LogsView: View {
 
         // Stream finished without being cancelled → the container's logs ended.
         guard !Task.isCancelled else { return }
-        if let joined = buf.drainIfChanged() { text = joined }
+        if let batch = buf.drainNew() { appendBatch(batch) }
         isLoading = false
-        text += (text.isEmpty ? "" : "\n") + "— stream ended —"
+        lines.append(LogLine(id: (lines.last?.id ?? -1) + 1, text: "— stream ended —"))
         follow = false
+    }
+
+    /// Folds a drained batch into the visible rows. A `dropped` batch means the
+    /// ring outran the display (window inactive long enough, or a very chatty
+    /// stream): what's on screen no longer adjoins the buffer, so replace it
+    /// wholesale instead of appending across the gap.
+    private func appendBatch(_ batch: (lines: [LogLine], dropped: Bool)) {
+        if batch.dropped {
+            lines = batch.lines
+        } else {
+            lines.append(contentsOf: batch.lines)
+            if lines.count > Self.maxDisplayLines {
+                lines.removeFirst(lines.count - Self.maxDisplayLines)
+            }
+        }
     }
 }
